@@ -149,6 +149,13 @@ function hashLane(str) {
   return h;
 }
 
+function pickFirstNumber(...values) {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 function fmtTime(ms) {
   const d = new Date(ms);
   const h = String(d.getHours()).padStart(2, '0');
@@ -684,7 +691,44 @@ class MarblePanelRuntime {
     this.setStatsText(`${count} event${count === 1 ? '' : 's'}`);
   }
 
+  normalizeContentEvent(msg) {
+    if (!msg || msg.type !== 'CONTENT_EVENT') return null;
+    const data = msg.data;
+    if (!data || data.type !== 'RXJS_EVENT') return null;
+    const payload = data.payload;
+    if (!payload || typeof payload !== 'object') return null;
+
+    const KIND_LABELS = { N: 'NEXT', E: 'ERROR', C: 'COMPLETE' };
+    const kind = KIND_LABELS[payload.kind] || (payload.kind ? String(payload.kind) : 'EVENT');
+    const label = payload.label || payload.key || '';
+    const laneKey = payload.key || payload.label || kind;
+
+    const timestamp =
+      pickFirstNumber(data?.time, msg.meta?.time, msg.time, payload.time, payload.t) ?? Date.now();
+
+    return {
+      type: label ? `${kind} • ${label}` : kind,
+      kind,
+      label,
+      key: payload.key,
+      value: payload.value,
+      time: timestamp,
+      laneKey,
+      color: payload.color,
+      payload,
+      tabId: msg.tabId,
+      meta: msg.meta,
+      raw: { background: msg, content: data },
+    };
+  }
+
   renderMessage(msg) {
+    const normalized = this.normalizeContentEvent(msg);
+    if (normalized) {
+      this.pushMarble(normalized);
+      return;
+    }
+
     this.pushMarble(msg);
   }
 
@@ -752,12 +796,25 @@ class MarblePanelRuntime {
     }
 
     const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
-    const lane = Math.abs(hashLane(type)) % Math.max(1, this.lanes);
+    const laneSource = msg?.laneKey ?? msg?.label ?? type;
+    const laneKey = laneSource == null ? type : String(laneSource);
+    const lane = Math.abs(hashLane(laneKey)) % Math.max(1, this.lanes);
+
+    let color = hashColor(type);
+    if (msg && msg.color != null) {
+      if (typeof msg.color === 'string') {
+        color = msg.color;
+      } else if (typeof msg.color === 'number' && Number.isFinite(msg.color)) {
+        const hue = ((msg.color % 360) + 360) % 360;
+        color = `hsl(${hue}, 70%, 55%)`;
+      }
+    }
+
     const marble = {
       id: this.nextId++,
       timeMs: time,
       r: 7,
-      color: hashColor(type),
+      color,
       msg,
       lane,
     };
