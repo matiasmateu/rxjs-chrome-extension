@@ -1,4 +1,4 @@
-const { useState, useEffect, useLayoutEffect, useMemo, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } = React;
 const e = React.createElement;
 
 const ROOT_STYLE = {
@@ -130,6 +130,7 @@ const TIP_TREE_STYLE = {
 };
 
 const PX_PER_SEC = 120;
+const MAX_AUTO_LANES = 128;
 
 function hashColor(str) {
   let h = 2166136261 >>> 0;
@@ -141,12 +142,6 @@ function hashColor(str) {
   const g = (h >>> 8) & 0xff;
   const b = (h >>> 16) & 0xff;
   return `rgb(${100 + (r % 156)}, ${100 + (g % 156)}, ${100 + (b % 156)})`;
-}
-
-function hashLane(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
-  return h;
 }
 
 function pickFirstNumber(...values) {
@@ -294,9 +289,11 @@ class MarblePanelRuntime {
     setTooltipState,
     setPinnedId,
     notifyRunningChange,
+    syncLaneCount,
     initialLanes,
     initialFilter,
     initialRunning,
+    maxAutoLanes = MAX_AUTO_LANES,
   }) {
     this.canvas = canvasRef.current;
     this.stageWrap = stageRef.current;
@@ -305,6 +302,7 @@ class MarblePanelRuntime {
     this.setTooltipState = setTooltipState;
     this.setPinnedId = setPinnedId;
     this.notifyRunningChange = notifyRunningChange;
+    this.syncLaneCount = syncLaneCount;
 
     this.ctx = null;
     this.width = 0;
@@ -316,10 +314,13 @@ class MarblePanelRuntime {
     this.yZoom = 1;
     this.worldOffsetPx = 0;
     this.timeOriginMs = Date.now();
+    this.maxAutoLanes = Math.max(1, maxAutoLanes);
 
     this.marbles = [];
     this.nextId = 1;
     this.totalEvents = 0;
+    this.domainOrder = [];
+    this.domainMap = new Map();
 
     this.hoverId = null;
     this.pinnedId = null;
@@ -670,11 +671,100 @@ class MarblePanelRuntime {
   }
 
   setLanes(value) {
-    this.lanes = Math.max(1, value);
+    const clamped = Math.max(1, Math.min(this.maxAutoLanes, value));
+    this.lanes = clamped;
+    if (this.syncLaneCount && clamped !== value) {
+      this.syncLaneCount(clamped);
+    }
   }
 
   setFilter(value) {
     this.filter = (value || '').trim().toLowerCase();
+  }
+
+  resolveLaneKey(rawKey) {
+    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true));
+  }
+
+  coerceLaneIndex(index) {
+    if (!Number.isFinite(index) || index < 0) return 0;
+    if (this.lanes <= 0) return 0;
+    if (index < this.lanes) return index;
+    return index % this.lanes;
+  }
+
+  extractLaneParts(rawKey) {
+    const key = rawKey ? String(rawKey) : 'default';
+    const slashIdx = key.indexOf('/');
+    const domain = slashIdx > 0 ? key.slice(0, slashIdx) : key;
+    const normalizedDomain = domain || 'default';
+    return { key, domain: normalizedDomain };
+  }
+
+  getLaneIndexForKey(rawKey, createIfMissing) {
+    const { key, domain } = this.extractLaneParts(rawKey);
+    let info = this.domainMap.get(domain);
+    let changed = false;
+
+    if (!info) {
+      if (!createIfMissing) return 0;
+      info = { actions: new Map(), baseOffset: 0 };
+      this.domainMap.set(domain, info);
+      this.domainOrder.push(domain);
+      changed = true;
+    }
+
+    if (!info.actions.has(key)) {
+      if (!createIfMissing) return info.baseOffset;
+      info.actions.set(key, info.actions.size);
+      changed = true;
+    }
+
+    if (changed && createIfMissing) {
+      this.updateLaneStructure(true);
+      info = this.domainMap.get(domain) || info;
+    }
+
+    const laneWithin = info.actions.get(key) ?? 0;
+    const laneIndex = (info.baseOffset ?? 0) + laneWithin;
+    return laneIndex;
+  }
+
+  updateLaneStructure(reassign) {
+    let offset = 0;
+    for (const domain of this.domainOrder) {
+      const info = this.domainMap.get(domain);
+      if (!info) continue;
+      const size = Math.max(1, info.actions.size || 0);
+      info.baseOffset = offset;
+      offset += size;
+    }
+
+    const prevLanes = this.lanes;
+    const totalLanes = offset > 0 ? offset : prevLanes || 1;
+    const clamped = Math.max(1, Math.min(this.maxAutoLanes, totalLanes));
+    this.lanes = clamped;
+    if (this.syncLaneCount && clamped !== prevLanes) {
+      this.syncLaneCount(clamped);
+    }
+
+    if (reassign) {
+      this.reassignMarbleLanes();
+    }
+  }
+
+  reassignMarbleLanes() {
+    if (!this.marbles.length) return;
+    for (const marble of this.marbles) {
+      const laneKey =
+        marble.laneKey ??
+        marble.msg?.laneKey ??
+        marble.msg?.actionType ??
+        marble.msg?.label ??
+        marble.msg?.type;
+      const laneIndex = this.getLaneIndexForKey(laneKey, false);
+      marble.lane = this.coerceLaneIndex(laneIndex);
+    }
   }
 
   clear() {
@@ -684,6 +774,9 @@ class MarblePanelRuntime {
     this.setPinned(null);
     this.hoverId = null;
     this.publishTooltip(null);
+    this.domainOrder.length = 0;
+    this.domainMap.clear();
+    this.updateLaneStructure(false);
   }
 
   publishStats() {
@@ -692,16 +785,26 @@ class MarblePanelRuntime {
   }
 
   normalizeContentEvent(msg) {
-    if (!msg || msg.type !== 'CONTENT_EVENT') return null;
+    if (!msg || typeof msg !== 'object') return null;
     const data = msg.data;
-    if (!data || data.type !== 'RXJS_EVENT') return null;
+    if (!data || typeof data !== 'object' || data.__from !== 'RXJS_HOOK') return null;
     const payload = data.payload;
     if (!payload || typeof payload !== 'object') return null;
 
     const KIND_LABELS = { N: 'NEXT', E: 'ERROR', C: 'COMPLETE' };
     const kind = KIND_LABELS[payload.kind] || (payload.kind ? String(payload.kind) : 'EVENT');
-    const label = payload.label || payload.key || '';
-    const laneKey = payload.key || payload.label || kind;
+    const sourceType =
+      typeof data.type === 'string'
+        ? data.type
+        : typeof msg.type === 'string'
+        ? msg.type
+        : '';
+    const actionType =
+      payload?.value && typeof payload.value === 'object' && typeof payload.value.type === 'string'
+        ? payload.value.type
+        : '';
+    const label = actionType || payload.label || payload.key || sourceType || '';
+    const laneKey = actionType || payload.key || payload.label || sourceType || kind;
 
     const timestamp =
       pickFirstNumber(data?.time, msg.meta?.time, msg.time, payload.time, payload.t) ?? Date.now();
@@ -710,6 +813,8 @@ class MarblePanelRuntime {
       type: label ? `${kind} • ${label}` : kind,
       kind,
       label,
+      epicName: sourceType || payload.label || payload.key || label,
+      actionType,
       key: payload.key,
       value: payload.value,
       time: timestamp,
@@ -798,7 +903,7 @@ class MarblePanelRuntime {
     const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
     const laneSource = msg?.laneKey ?? msg?.label ?? type;
     const laneKey = laneSource == null ? type : String(laneSource);
-    const lane = Math.abs(hashLane(laneKey)) % Math.max(1, this.lanes);
+    const lane = this.resolveLaneKey(laneKey);
 
     let color = hashColor(type);
     if (msg && msg.color != null) {
@@ -816,6 +921,7 @@ class MarblePanelRuntime {
       r: 7,
       color,
       msg,
+      laneKey,
       lane,
     };
     this.marbles.push(marble);
@@ -842,6 +948,14 @@ function PanelApp() {
   const [stageSizeVersion, setStageSizeVersion] = useState(0);
   const [tooltipRenderStyle, setTooltipRenderStyle] = useState({ display: 'none', transform: 'translate(0px,0px)' });
 
+  const handleSyncLaneCount = useCallback((nextLanes) => {
+    if (typeof nextLanes !== 'number' || Number.isNaN(nextLanes)) return;
+    setLanes((prev) => {
+      const clamped = Math.max(1, Math.min(MAX_AUTO_LANES, Math.round(nextLanes)));
+      return clamped === prev ? prev : clamped;
+    });
+  }, []);
+
   useEffect(() => {
     const runtime = new MarblePanelRuntime({
       canvasRef,
@@ -851,9 +965,11 @@ function PanelApp() {
       setTooltipState: (payload) => setTooltipState(payload),
       setPinnedId,
       notifyRunningChange: (value) => setRunning(value),
+      syncLaneCount: handleSyncLaneCount,
       initialLanes: lanes,
       initialFilter: filter,
       initialRunning: running,
+      maxAutoLanes: MAX_AUTO_LANES,
     });
     runtimeRef.current = runtime;
 
@@ -1009,7 +1125,7 @@ function PanelApp() {
       key: 'lanes',
       type: 'range',
       min: 1,
-      max: 8,
+      max: MAX_AUTO_LANES,
       step: 1,
       value: lanes,
       onChange: (event) => setLanes(Number(event.target.value)),

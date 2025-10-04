@@ -47,14 +47,19 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tabId = sender?.tab?.id;
   if (typeof tabId === 'number') {
+    const eventType =
+      typeof msg?.type === 'string' && msg.type.trim().length > 0
+        ? msg.type
+        : 'CONTENT_EVENT';
+
     // Wrap or pass through the payload as you like
     const payload = {
-      type: 'CONTENT_EVENT',
+      type: eventType,
       tabId,
       // preserve original message under "data"
       data: msg,
       // optional metadata
-      meta: { origin: 'content-script', time: Date.now() }
+      meta: { origin: 'content-script', time: Date.now(), originalType: 'CONTENT_EVENT' }
     };
     forwardToPanel(tabId, payload);
     // If you don't need async work, return false and respond immediately:
