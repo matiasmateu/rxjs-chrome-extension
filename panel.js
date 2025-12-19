@@ -204,6 +204,7 @@ const TIP_PILL_STYLE = {
 };
 
 const PX_PER_SEC = 120;
+const NOW_MARKER_OFFSET = 80;
 const MAX_AUTO_LANES = 128;
 
 function hashColor(str) {
@@ -724,7 +725,7 @@ class MarblePanelRuntime {
 
   xForTime(ms) {
     const dtSec = (this.timeOriginMs - ms) / 1000;
-    return this.width - 22 - dtSec * PX_PER_SEC + this.worldOffsetPx;
+    return this.width - NOW_MARKER_OFFSET - dtSec * PX_PER_SEC + this.worldOffsetPx;
   }
 
   frame() {
@@ -780,9 +781,9 @@ class MarblePanelRuntime {
     ctx.stroke();
 
     ctx.fillStyle = '#7aa2d3';
-    ctx.fillRect(this.width - 22, 0, 2, this.height);
+    ctx.fillRect(this.width - NOW_MARKER_OFFSET, 0, 2, this.height);
     ctx.textAlign = 'right';
-    ctx.fillText(`now ${fmtTime(rightMs)}`, this.width - 26, 12);
+    ctx.fillText(`now ${fmtTime(rightMs)}`, this.width - (NOW_MARKER_OFFSET + 4), 12);
     ctx.textAlign = 'left';
   }
 
