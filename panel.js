@@ -1,4 +1,4 @@
-const { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } = React;
 const e = React.createElement;
 
 const ROOT_STYLE = {
@@ -6,7 +6,7 @@ const ROOT_STYLE = {
   height: '100vh',
   width: '100vw',
   display: 'grid',
-  gridTemplateRows: 'auto 1fr auto',
+  gridTemplateRows: 'auto auto 1fr auto',
   background: '#0b0f14',
   color: '#d6e2f0',
   fontFamily:
@@ -122,11 +122,85 @@ const TIP_SCROLL_STYLE = {
   padding: '10px 12px',
 };
 
+const TIP_CONTENT_STYLE = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '10px',
+  lineHeight: 1.5,
+};
+
 const TIP_TREE_STYLE = {
-  fontFamily:
-    'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: '12px',
   lineHeight: 1.4,
+};
+
+const FILTER_BAR_STYLE = {
+  display: 'flex',
+  gap: '14px',
+  padding: '8px 12px',
+  borderBottom: '1px solid #1d2733',
+  background: '#0d131a',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+};
+
+const FILTER_GROUP_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flexWrap: 'wrap',
+};
+
+const FILTER_GROUP_LABEL_STYLE = {
+  fontSize: '12px',
+  opacity: 0.7,
+  fontWeight: 600,
+};
+
+const FILTER_CHIP_STYLE = {
+  padding: '6px 10px',
+  borderRadius: '10px',
+  border: '1px solid #243244',
+  background: '#0b1117',
+  color: '#d6e2f0',
+  cursor: 'pointer',
+  fontSize: '12px',
+};
+
+const FILTER_CHIP_ACTIVE_STYLE = {
+  background: '#1b2a3b',
+  borderColor: '#3b82f6',
+  color: '#d6e8ff',
+  boxShadow: '0 0 0 1px rgba(59,130,246,.35)',
+};
+
+const TIP_ROW_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flexWrap: 'wrap',
+};
+
+const TIP_LABEL_STYLE = {
+  fontSize: '12px',
+  opacity: 0.8,
+  fontWeight: 600,
+};
+
+const TIP_PILL_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '8px 10px',
+  borderRadius: '10px',
+  background: 'rgba(52,73,94,.35)',
+  fontWeight: 600,
+  letterSpacing: '0.2px',
+  fontSize: '12px',
+  width: 'fit-content',
+  maxWidth: '100%',
+  wordBreak: 'break-word',
 };
 
 const PX_PER_SEC = 120;
@@ -157,6 +231,89 @@ function fmtTime(ms) {
   const m = String(d.getMinutes()).padStart(2, '0');
   const s = String(d.getSeconds()).padStart(2, '0');
   return `${h}:${m}:${s}`;
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function normalizeTypeLabel(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('•')) {
+    const parts = trimmed.split('•');
+    return parts[parts.length - 1].trim();
+  }
+  return trimmed;
+}
+
+function prettifyDomain(domain) {
+  if (!domain) return '';
+  return domain
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function normalizeTimestampMs(...values) {
+  const numeric = pickFirstNumber(...values);
+  if (typeof numeric === 'number') return numeric;
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function extractFilterTags(message) {
+  const actionRaw = normalizeTypeLabel(
+    firstString(
+      message?.data?.action,
+      message?.payload?.action?.type,
+      message?.payload?.value?.type,
+      message?.raw?.content?.type,
+      message?.actionType,
+      message?.label,
+      message?.type,
+    ),
+  );
+
+  const domainRaw = normalizeTypeLabel(
+    firstString(
+      message?.data?.domain,
+      message?.payload?.domain,
+      message?.domain,
+      message?.raw?.content?.domain,
+      actionRaw ? actionRaw.split('/')[0] : '',
+    ),
+  );
+
+  const epicRaw = firstString(
+    message?.data?.epicName,
+    message?.payload?.epicName,
+    message?.raw?.content?.epicName,
+    message?.epicName,
+  );
+
+  const domainKey = (domainRaw || '').toLowerCase();
+  const actionKey = (actionRaw || '').toLowerCase();
+  const epicKey = (epicRaw || '').toLowerCase();
+
+  return {
+    domainKey,
+    domainLabel: prettifyDomain(domainRaw) || domainRaw || '',
+    actionKey,
+    actionLabel: actionRaw || '',
+    epicKey,
+    epicLabel: epicRaw || '',
+  };
 }
 
 function formatLeaf(v) {
@@ -197,13 +354,6 @@ function truncate(s, n) {
   if (!s) return '';
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
-
-function JsonTree({ data }, ref) {
-  const nodes = useMemo(() => buildJsonNodes('', data, 0, new WeakSet()), [data]);
-  return e('div', { ref, style: TIP_TREE_STYLE }, nodes);
-}
-
-const ForwardJsonTree = React.forwardRef(JsonTree);
 
 function buildJsonNodes(key, value, depth, visited) {
   const elements = [];
@@ -280,6 +430,81 @@ function buildJsonNodes(key, value, depth, visited) {
   return elements;
 }
 
+function JsonTree({ data }, ref) {
+  const nodes = useMemo(() => buildJsonNodes('', data, 0, new WeakSet()), [data]);
+  return e('div', { ref, style: TIP_TREE_STYLE }, nodes);
+}
+
+const ForwardJsonTree = React.forwardRef(JsonTree);
+
+function extractMessageInfo(message) {
+  const actionType = normalizeTypeLabel(
+    firstString(
+      message?.data?.action,
+      message?.payload?.action?.type,
+      message?.payload?.value?.type,
+      message?.raw?.content?.type,
+      message?.actionType,
+      message?.label,
+      message?.type,
+    ),
+  );
+
+  const explicitDomain = normalizeTypeLabel(
+    firstString(
+      message?.data?.domain,
+      message?.payload?.domain,
+      message?.domain,
+      message?.raw?.content?.domain,
+      actionType ? actionType.split('/')[0] : '',
+    ),
+  );
+
+  const epicName = firstString(
+    message?.data?.epicName,
+    message?.payload?.epicName,
+    message?.raw?.content?.epicName,
+    message?.epicName,
+  );
+
+  const actionPayload =
+    message?.data?.payload?.action?.payload ??
+    message?.payload?.action?.payload ??
+    message?.raw?.content?.payload ??
+    null;
+
+  const timeMs = normalizeTimestampMs(
+    message?.data?.time,
+    message?.payload?.time,
+    message?.time,
+    message?.ts,
+    message?.timestamp,
+    message?.raw?.content?.time,
+  );
+
+  if (!actionType && !explicitDomain) {
+    return {
+      domainLabel: 'Unknown domain',
+      actionType: '',
+      epicName: epicName || '',
+      timeLabel: timeMs ? fmtTime(timeMs) : '',
+      actionPayload,
+    };
+  }
+
+  const domainFromExplicit = explicitDomain ? explicitDomain.split('/')[0] || explicitDomain : '';
+  const domainRaw = domainFromExplicit || (actionType ? actionType.split('/')[0] : '');
+  const domainLabel = prettifyDomain(domainRaw) || domainRaw || 'Unknown domain';
+
+  return {
+    domainLabel,
+    actionType: actionType || domainRaw,
+    epicName: epicName || '',
+    timeLabel: timeMs ? fmtTime(timeMs) : '',
+    actionPayload,
+  };
+}
+
 class MarblePanelRuntime {
   constructor({
     canvasRef,
@@ -292,7 +517,9 @@ class MarblePanelRuntime {
     syncLaneCount,
     initialLanes,
     initialFilter,
+    initialDomainFilter,
     initialRunning,
+    setFilterOptions,
     maxAutoLanes = MAX_AUTO_LANES,
   }) {
     this.canvas = canvasRef.current;
@@ -310,7 +537,10 @@ class MarblePanelRuntime {
 
     this.running = initialRunning;
     this.lanes = initialLanes;
-    this.filter = initialFilter;
+    this.filterText = (initialFilter || '').trim().toLowerCase();
+    this.filterDomain = (initialDomainFilter || '').toLowerCase();
+    this.filterDomains = new Map();
+    this.notifyFilterOptions = setFilterOptions || null;
     this.yZoom = 1;
     this.worldOffsetPx = 0;
     this.timeOriginMs = Date.now();
@@ -567,7 +797,8 @@ class MarblePanelRuntime {
       this.worldOffsetPx = this.dragStart.offset + dx;
     }
 
-    const filter = this.filter;
+    const filterText = this.filterText;
+    const filterDomain = this.filterDomain;
 
     for (let i = this.marbles.length - 1; i >= 0; i--) {
       const marble = this.marbles[i];
@@ -575,8 +806,12 @@ class MarblePanelRuntime {
       if (x < -40 || x > this.width + 40) continue;
 
       const label = (marble.msg?.type || '').toString();
-      const visible = !filter || label.toLowerCase().includes(filter);
-      if (!visible) continue;
+      const tags = marble.filters || {};
+
+      const matchesText = !filterText || label.toLowerCase().includes(filterText);
+      const matchesDomain = !filterDomain || (tags.domainKey && tags.domainKey === filterDomain);
+
+      if (!(matchesText && matchesDomain)) continue;
 
       const baseY = this.laneY(marble.lane);
       const y = baseY * this.yZoom + (1 - this.yZoom) * this.height * 0.5;
@@ -678,8 +913,36 @@ class MarblePanelRuntime {
     }
   }
 
-  setFilter(value) {
-    this.filter = (value || '').trim().toLowerCase();
+  setFilterText(value) {
+    this.filterText = (value || '').trim().toLowerCase();
+  }
+
+  setFilterDomain(value) {
+    this.filterDomain = (value || '').toLowerCase();
+  }
+
+  ingestFilterTags(tags) {
+    if (!tags) return;
+    let changed = false;
+
+    if (tags.domainKey) {
+      const label = tags.domainLabel || tags.domainKey;
+      if (!this.filterDomains.has(tags.domainKey)) {
+        this.filterDomains.set(tags.domainKey, label);
+        changed = true;
+      }
+    }
+
+    if (changed && this.notifyFilterOptions) {
+      const domains = Array.from(this.filterDomains.entries()).map(([value, label]) => ({
+        value,
+        label: label || value,
+      }));
+
+      domains.sort((a, b) => a.label.localeCompare(b.label));
+
+      this.notifyFilterOptions({ domains });
+    }
   }
 
   resolveLaneKey(rawKey) {
@@ -776,6 +1039,10 @@ class MarblePanelRuntime {
     this.publishTooltip(null);
     this.domainOrder.length = 0;
     this.domainMap.clear();
+    this.filterDomains.clear();
+    if (this.notifyFilterOptions) {
+      this.notifyFilterOptions({ domains: [] });
+    }
     this.updateLaneStructure(false);
   }
 
@@ -915,6 +1182,8 @@ class MarblePanelRuntime {
       }
     }
 
+    const filters = extractFilterTags(msg || {});
+
     const marble = {
       id: this.nextId++,
       timeMs: time,
@@ -923,8 +1192,10 @@ class MarblePanelRuntime {
       msg,
       laneKey,
       lane,
+      filters,
     };
     this.marbles.push(marble);
+    this.ingestFilterTags(filters);
     this.totalEvents++;
     this.publishStats();
   }
@@ -934,12 +1205,13 @@ function PanelApp() {
   const stageRef = useRef(null);
   const canvasRef = useRef(null);
   const tooltipRef = useRef(null);
-  const tipTreeRef = useRef(null);
   const runtimeRef = useRef(null);
 
   const [running, setRunning] = useState(true);
   const [lanes, setLanes] = useState(4);
-  const [filter, setFilter] = useState('');
+  const [filterText, setFilterText] = useState('');
+  const [filterDomain, setFilterDomain] = useState('');
+  const [filterOptions, setFilterOptions] = useState({ domains: [] });
   const [statsText, setStatsText] = useState('0 events');
   const [tooltipState, setTooltipState] = useState({ visible: false, position: { x: 0, y: 0 } });
   const [pinnedId, setPinnedId] = useState(null);
@@ -967,8 +1239,10 @@ function PanelApp() {
       notifyRunningChange: (value) => setRunning(value),
       syncLaneCount: handleSyncLaneCount,
       initialLanes: lanes,
-      initialFilter: filter,
+      initialFilter: filterText,
+      initialDomainFilter: filterDomain,
       initialRunning: running,
+      setFilterOptions,
       maxAutoLanes: MAX_AUTO_LANES,
     });
     runtimeRef.current = runtime;
@@ -997,8 +1271,12 @@ function PanelApp() {
   }, [lanes]);
 
   useEffect(() => {
-    runtimeRef.current?.setFilter(filter);
-  }, [filter]);
+    runtimeRef.current?.setFilterText(filterText);
+  }, [filterText]);
+
+  useEffect(() => {
+    runtimeRef.current?.setFilterDomain(filterDomain);
+  }, [filterDomain]);
 
   useLayoutEffect(() => {
     const tipEl = tooltipRef.current;
@@ -1040,7 +1318,10 @@ function PanelApp() {
 
   const handleToggleRunning = () => setRunning((prev) => !prev);
 
-  const handleClear = () => runtimeRef.current?.clear();
+  const handleClear = () => {
+    runtimeRef.current?.clear();
+    setFilterDomain('');
+  };
 
   const handleCopy = async () => {
     if (!tooltipState.message) return;
@@ -1074,14 +1355,6 @@ function PanelApp() {
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  const handleExpandCollapse = (open) => {
-    const tree = tipTreeRef.current;
-    if (!tree) return;
-    tree.querySelectorAll('details').forEach((el) => {
-      el.open = open;
-    });
-  };
-
   const handlePin = () => {
     if (!runtimeRef.current) return;
     if (pinnedId != null) {
@@ -1097,6 +1370,45 @@ function PanelApp() {
     runtimeRef.current.setPinned(null);
     runtimeRef.current.publishTooltip(null);
   };
+
+  const toggleFilterValue = (setter) => (value) => {
+    setter((prev) => (prev === value ? '' : value));
+  };
+
+  const handleSelectDomain = toggleFilterValue(setFilterDomain);
+
+  const renderFilterGroup = (label, options, activeValue, onSelect) =>
+    e(
+      'div',
+      { style: FILTER_GROUP_STYLE, key: `${label}-group` },
+      e('span', { style: FILTER_GROUP_LABEL_STYLE }, label),
+      e(
+        'button',
+        {
+          style: {
+            ...FILTER_CHIP_STYLE,
+            ...(activeValue ? {} : FILTER_CHIP_ACTIVE_STYLE),
+          },
+          onClick: () => onSelect(''),
+        },
+        'Any',
+      ),
+      ...(options || []).map((option) =>
+        e(
+          'button',
+          {
+            key: `${label}-${option.value}`,
+            style: {
+              ...FILTER_CHIP_STYLE,
+              ...(activeValue === option.value ? FILTER_CHIP_ACTIVE_STYLE : null),
+            },
+            onClick: () => onSelect(option.value),
+            title: option.label,
+          },
+          option.label || option.value || 'Unknown',
+        ),
+      ),
+    );
 
   const toolbarChildren = [
     e('div', { key: 'title', style: TITLE_STYLE }, 'Marble Timeline'),
@@ -1136,13 +1448,15 @@ function PanelApp() {
       key: 'filter',
       type: 'text',
       placeholder: 'Filter type includes… (e.g. NEXT, ERROR)',
-      value: filter,
-      onChange: (event) => setFilter(event.target.value),
+      value: filterText,
+      onChange: (event) => setFilterText(event.target.value),
       style: FILTER_INPUT_STYLE,
     }),
     e('div', { key: 'sep3', style: { width: '1px', height: '20px', background: '#1f2a38' } }),
     e('div', { key: 'stats', style: STATS_STYLE }, statsText),
   ];
+
+  const messageInfo = tooltipState.message ? extractMessageInfo(tooltipState.message) : null;
 
   const tooltipButtons = [
     e(
@@ -1164,26 +1478,6 @@ function PanelApp() {
         disabled: !tooltipState.visible || !tooltipState.message,
       },
       'Download',
-    ),
-    e(
-      'button',
-      {
-        key: 'expand',
-        style: SMALL_BTN_STYLE,
-        onClick: () => handleExpandCollapse(true),
-        disabled: !tooltipState.visible,
-      },
-      'Expand all',
-    ),
-    e(
-      'button',
-      {
-        key: 'collapse',
-        style: SMALL_BTN_STYLE,
-        onClick: () => handleExpandCollapse(false),
-        disabled: !tooltipState.visible,
-      },
-      'Collapse all',
     ),
     e(
       'button',
@@ -1213,6 +1507,11 @@ function PanelApp() {
     e('div', { style: TOOLBAR_STYLE }, toolbarChildren),
     e(
       'div',
+      { style: FILTER_BAR_STYLE },
+      renderFilterGroup('Domain', filterOptions.domains, filterDomain, handleSelectDomain),
+    ),
+    e(
+      'div',
       { ref: stageRef, style: STAGE_STYLE },
       e('canvas', { ref: canvasRef }),
       e(
@@ -1231,7 +1530,62 @@ function PanelApp() {
           'div',
           { style: TIP_SCROLL_STYLE },
           tooltipState.visible && tooltipState.message
-            ? e(ForwardJsonTree, { data: tooltipState.message, ref: tipTreeRef })
+            ? e(
+                'div',
+                { style: TIP_CONTENT_STYLE },
+                e(
+                  'div',
+                  { style: TIP_ROW_STYLE },
+                  e('span', { style: TIP_LABEL_STYLE }, 'Domain:'),
+                  e(
+                    'span',
+                    { style: TIP_PILL_STYLE },
+                    messageInfo?.domainLabel || 'Unknown domain',
+                  ),
+                ),
+                e(
+                  'div',
+                  { style: TIP_ROW_STYLE },
+                  e('span', { style: TIP_LABEL_STYLE }, 'Epic:'),
+                  e(
+                    'span',
+                    { style: TIP_PILL_STYLE },
+                    messageInfo?.epicName || 'Unknown epic',
+                  ),
+                ),
+                e(
+                  'div',
+                  { style: TIP_ROW_STYLE },
+                  e('span', { style: TIP_LABEL_STYLE }, 'Action:'),
+                  e(
+                    'span',
+                    { style: TIP_PILL_STYLE },
+                    messageInfo?.actionType || 'Unknown action',
+                  ),
+                ),
+                e(
+                  'div',
+                  { style: TIP_ROW_STYLE },
+                  e('span', { style: TIP_LABEL_STYLE }, 'Time:'),
+                  e(
+                    'span',
+                    { style: TIP_PILL_STYLE },
+                    messageInfo?.timeLabel || 'Unknown time',
+                  ),
+                ),
+                e(
+                  'div',
+                  null,
+                  e('div', { style: TIP_LABEL_STYLE }, 'Action payload:'),
+                  messageInfo?.actionPayload
+                    ? e(
+                        'div',
+                        { style: { marginTop: '4px' } },
+                        e(ForwardJsonTree, { data: messageInfo.actionPayload }),
+                      )
+                    : e('div', { style: TIP_LABEL_STYLE }, 'None'),
+                ),
+              )
             : e('div', null, 'No data'),
         ),
       ),
@@ -1239,7 +1593,7 @@ function PanelApp() {
     e(
       'div',
       { style: LEGEND_STYLE },
-      'Tip: hover for data • click to pin • Expand/Collapse • wheel to zoom Y • drag to pan • Space Play/Pause',
+      'Tip: hover for data • click to pin • wheel to zoom Y • drag to pan • Space Play/Pause',
     ),
   );
 }
