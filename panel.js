@@ -206,6 +206,9 @@ const TIP_PILL_STYLE = {
 const PX_PER_SEC = 120;
 const NOW_MARKER_OFFSET = 80;
 const MAX_AUTO_LANES = 128;
+const LANE_STROKE_COLOR = '#213145';
+const DISABLED_LANE_STROKE = '#4b5563';
+const DISABLED_MARBLE_COLOR = '#6b7280';
 
 function hashColor(str) {
   let h = 2166136261 >>> 0;
@@ -273,47 +276,31 @@ function normalizeTimestampMs(...values) {
   return undefined;
 }
 
+function normalizeRxKind(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+}
+
+function isRxDevtoolsMessage(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.kind === 'string' &&
+    typeof value.observableId === 'string' &&
+    typeof value.instanceId === 'string' &&
+    typeof value.subscriptionId === 'string' &&
+    typeof value.ts === 'number' &&
+    Number.isFinite(value.ts)
+  );
+}
+
 function extractFilterTags(message) {
-  const actionRaw = normalizeTypeLabel(
-    firstString(
-      message?.data?.action,
-      message?.payload?.action?.type,
-      message?.payload?.value?.type,
-      message?.raw?.content?.type,
-      message?.actionType,
-      message?.label,
-      message?.type,
-    ),
-  );
-
-  const domainRaw = normalizeTypeLabel(
-    firstString(
-      message?.data?.domain,
-      message?.payload?.domain,
-      message?.domain,
-      message?.raw?.content?.domain,
-      actionRaw ? actionRaw.split('/')[0] : '',
-    ),
-  );
-
-  const epicRaw = firstString(
-    message?.data?.epicName,
-    message?.payload?.epicName,
-    message?.raw?.content?.epicName,
-    message?.epicName,
-  );
-
-  const domainKey = (domainRaw || '').toLowerCase();
-  const actionKey = (actionRaw || '').toLowerCase();
-  const epicKey = (epicRaw || '').toLowerCase();
+  const domainRaw = normalizeTypeLabel(firstString(message?.source?.domain, message?.domain));
+  const domainKey = (domainRaw || 'unknown').toLowerCase();
 
   return {
     domainKey,
-    domainLabel: prettifyDomain(domainRaw) || domainRaw || '',
-    actionKey,
-    actionLabel: actionRaw || '',
-    epicKey,
-    epicLabel: epicRaw || '',
+    domainLabel: domainRaw ? prettifyDomain(domainRaw) || domainRaw : 'Unknown',
   };
 }
 
@@ -439,70 +426,31 @@ function JsonTree({ data }, ref) {
 const ForwardJsonTree = React.forwardRef(JsonTree);
 
 function extractMessageInfo(message) {
-  const actionType = normalizeTypeLabel(
-    firstString(
-      message?.data?.action,
-      message?.payload?.action?.type,
-      message?.payload?.value?.type,
-      message?.raw?.content?.type,
-      message?.actionType,
-      message?.label,
-      message?.type,
-    ),
+  const label = firstString(
+    message?.source?.label,
+    message?.label,
+    message?.observableId,
+    message?.instanceId,
   );
 
-  const explicitDomain = normalizeTypeLabel(
-    firstString(
-      message?.data?.domain,
-      message?.payload?.domain,
-      message?.domain,
-      message?.raw?.content?.domain,
-      actionType ? actionType.split('/')[0] : '',
-    ),
-  );
+  const domainRaw = normalizeTypeLabel(firstString(message?.source?.domain, message?.domain));
+  const kindRaw = normalizeTypeLabel(firstString(message?.rxKind, message?.kind));
+  const operator = firstString(message?.source?.operator);
+  const tags = Array.isArray(message?.source?.tags) ? message.source.tags : [];
 
-  const epicName = firstString(
-    message?.data?.epicName,
-    message?.payload?.epicName,
-    message?.raw?.content?.epicName,
-    message?.epicName,
-  );
-
-  const actionPayload =
-    message?.data?.payload?.action?.payload ??
-    message?.payload?.action?.payload ??
-    message?.raw?.content?.payload ??
-    null;
-
-  const timeMs = normalizeTimestampMs(
-    message?.data?.time,
-    message?.payload?.time,
-    message?.time,
-    message?.ts,
-    message?.timestamp,
-    message?.raw?.content?.time,
-  );
-
-  if (!actionType && !explicitDomain) {
-    return {
-      domainLabel: 'Unknown domain',
-      actionType: '',
-      epicName: epicName || '',
-      timeLabel: timeMs ? fmtTime(timeMs) : '',
-      actionPayload,
-    };
-  }
-
-  const domainFromExplicit = explicitDomain ? explicitDomain.split('/')[0] || explicitDomain : '';
-  const domainRaw = domainFromExplicit || (actionType ? actionType.split('/')[0] : '');
-  const domainLabel = prettifyDomain(domainRaw) || domainRaw || 'Unknown domain';
+  const timeMs = normalizeTimestampMs(message?.ts, message?.time, message?.timestamp);
 
   return {
-    domainLabel,
-    actionType: actionType || domainRaw,
-    epicName: epicName || '',
+    domainLabel: domainRaw ? prettifyDomain(domainRaw) || domainRaw : 'Unknown domain',
+    label: label || 'Unknown label',
+    kindLabel: kindRaw ? kindRaw.toUpperCase() : 'UNKNOWN',
+    operator: operator || '',
+    observableId: message?.observableId || 'Unknown observable',
+    instanceId: message?.instanceId || '',
+    subscriptionId: message?.subscriptionId || '',
+    tags,
     timeLabel: timeMs ? fmtTime(timeMs) : '',
-    actionPayload,
+    dataPayload: message?.data ?? null,
   };
 }
 
@@ -552,6 +500,9 @@ class MarblePanelRuntime {
     this.totalEvents = 0;
     this.domainOrder = [];
     this.domainMap = new Map();
+    this.laneStatus = new Map();
+    this.subscriptionState = new Map();
+    this.laneIndexMap = [];
 
     this.hoverId = null;
     this.pinnedId = null;
@@ -716,6 +667,87 @@ class MarblePanelRuntime {
     }
   }
 
+  rebuildLaneIndexMap() {
+    const laneCount = Math.max(1, this.lanes);
+    const nextMap = Array.from({ length: laneCount }, () => new Set());
+
+    for (const domain of this.domainOrder) {
+      const info = this.domainMap.get(domain);
+      if (!info) continue;
+      for (const [key, offset] of info.actions.entries()) {
+        const laneIndex = this.coerceLaneIndex((info.baseOffset ?? 0) + offset);
+        nextMap[laneIndex].add(key);
+      }
+    }
+
+    this.laneIndexMap = nextMap;
+  }
+
+  updateLaneState(laneKey, kind, subscriptionId) {
+    if (!laneKey) return;
+    const rxKind = normalizeRxKind(kind);
+    if (!rxKind) return;
+
+    if (rxKind === 'subscribe') {
+      const state = this.laneStatus.get(laneKey) || { activeCount: 0, disabled: false };
+      if (subscriptionId) {
+        const existing = this.subscriptionState.get(subscriptionId);
+        if (!existing || !existing.active) {
+          this.subscriptionState.set(subscriptionId, { laneKey, active: true });
+          state.activeCount += 1;
+        }
+      } else {
+        state.activeCount += 1;
+      }
+      state.disabled = false;
+      this.laneStatus.set(laneKey, state);
+      return;
+    }
+
+    const isTerminal =
+      rxKind === 'complete' || rxKind === 'error' || rxKind === 'unsubscribe';
+    if (!isTerminal) return;
+
+    const sub = subscriptionId ? this.subscriptionState.get(subscriptionId) : null;
+    const targetLaneKey = sub?.laneKey || laneKey;
+    const state = this.laneStatus.get(targetLaneKey) || { activeCount: 0, disabled: false };
+
+    if (subscriptionId && sub) {
+      if (sub.active) {
+        state.activeCount = Math.max(0, state.activeCount - 1);
+      }
+      this.subscriptionState.delete(subscriptionId);
+    } else if (!subscriptionId || rxKind !== 'unsubscribe') {
+      state.activeCount = Math.max(0, state.activeCount - 1);
+    }
+
+    if (state.activeCount === 0) {
+      state.disabled = true;
+    }
+
+    this.laneStatus.set(targetLaneKey, state);
+  }
+
+  isLaneDisabledForKey(laneKey) {
+    if (!laneKey) return false;
+    const state = this.laneStatus.get(laneKey);
+    return Boolean(state && state.disabled && state.activeCount <= 0);
+  }
+
+  isLaneDisabledForIndex(laneIndex) {
+    const entries = this.laneIndexMap[laneIndex];
+    if (!entries || entries.size === 0) return false;
+    let hasState = false;
+    for (const key of entries) {
+      const state = this.laneStatus.get(key);
+      if (!state) continue;
+      hasState = true;
+      if (state.activeCount > 0) return false;
+      if (!state.disabled) return false;
+    }
+    return hasState;
+  }
+
   laneY(lane) {
     const pad = 24;
     const inner = Math.max(1, this.height - pad * 2);
@@ -771,14 +803,14 @@ class MarblePanelRuntime {
     }
     ctx.stroke();
 
-    ctx.strokeStyle = '#213145';
-    ctx.beginPath();
     for (let l = 0; l < this.lanes; l++) {
       const y = this.laneY(l);
+      ctx.strokeStyle = this.isLaneDisabledForIndex(l) ? DISABLED_LANE_STROKE : LANE_STROKE_COLOR;
+      ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
+      ctx.stroke();
     }
-    ctx.stroke();
 
     ctx.fillStyle = '#7aa2d3';
     ctx.fillRect(this.width - NOW_MARKER_OFFSET, 0, 2, this.height);
@@ -817,8 +849,9 @@ class MarblePanelRuntime {
       const baseY = this.laneY(marble.lane);
       const y = baseY * this.yZoom + (1 - this.yZoom) * this.height * 0.5;
 
+      const laneDisabled = this.isLaneDisabledForKey(marble.laneKey);
       ctx.beginPath();
-      ctx.fillStyle = marble.color;
+      ctx.fillStyle = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
       ctx.arc(x, y, marble.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.lineWidth = 2;
@@ -912,6 +945,7 @@ class MarblePanelRuntime {
     if (this.syncLaneCount && clamped !== value) {
       this.syncLaneCount(clamped);
     }
+    this.rebuildLaneIndexMap();
   }
 
   setFilterText(value) {
@@ -1015,6 +1049,7 @@ class MarblePanelRuntime {
     if (reassign) {
       this.reassignMarbleLanes();
     }
+    this.rebuildLaneIndexMap();
   }
 
   reassignMarbleLanes() {
@@ -1023,7 +1058,7 @@ class MarblePanelRuntime {
       const laneKey =
         marble.laneKey ??
         marble.msg?.laneKey ??
-        marble.msg?.actionType ??
+        marble.msg?.observableId ??
         marble.msg?.label ??
         marble.msg?.type;
       const laneIndex = this.getLaneIndexForKey(laneKey, false);
@@ -1040,6 +1075,9 @@ class MarblePanelRuntime {
     this.publishTooltip(null);
     this.domainOrder.length = 0;
     this.domainMap.clear();
+    this.laneStatus.clear();
+    this.subscriptionState.clear();
+    this.laneIndexMap = [];
     this.filterDomains.clear();
     if (this.notifyFilterOptions) {
       this.notifyFilterOptions({ domains: [] });
@@ -1054,55 +1092,59 @@ class MarblePanelRuntime {
 
   normalizeContentEvent(msg) {
     if (!msg || typeof msg !== 'object') return null;
-    const data = msg.data;
-    if (!data || typeof data !== 'object' || data.__from !== 'RXJS_HOOK') return null;
-    const payload = data.payload;
-    if (!payload || typeof payload !== 'object') return null;
+    const data = msg.data && typeof msg.data === 'object' ? msg.data : null;
 
-    const KIND_LABELS = { N: 'NEXT', E: 'ERROR', C: 'COMPLETE' };
-    const kind = KIND_LABELS[payload.kind] || (payload.kind ? String(payload.kind) : 'EVENT');
-    const sourceType =
-      typeof data.type === 'string'
-        ? data.type
-        : typeof msg.type === 'string'
-        ? msg.type
-        : '';
-    const actionType =
-      payload?.value && typeof payload.value === 'object' && typeof payload.value.type === 'string'
-        ? payload.value.type
-        : '';
-    const label = actionType || payload.label || payload.key || sourceType || '';
-    const laneKey = actionType || payload.key || payload.label || sourceType || kind;
+    const devtoolsCandidate = data?.message ?? msg.message;
+    if (isRxDevtoolsMessage(devtoolsCandidate)) {
+      const rxKind = normalizeRxKind(devtoolsCandidate.kind);
+      const kindLabel = rxKind ? rxKind.toUpperCase() : 'EVENT';
+      const source = devtoolsCandidate.source || {};
+      const label = firstString(
+        source.label,
+        devtoolsCandidate.observableId,
+        devtoolsCandidate.instanceId,
+      );
+      const domainRaw = firstString(source.domain);
+      const domain = (domainRaw || 'unknown').toLowerCase();
+      const observableKey =
+        devtoolsCandidate.observableId || devtoolsCandidate.instanceId || label || kindLabel;
+      const laneKey = domain ? `${domain}/${observableKey}` : observableKey;
+      const timestamp =
+        pickFirstNumber(
+          devtoolsCandidate.ts,
+          msg.meta?.time,
+          msg.time,
+          msg.ts,
+          msg.timestamp,
+        ) ?? Date.now();
 
-    const timestamp =
-      pickFirstNumber(data?.time, msg.meta?.time, msg.time, payload.time, payload.t) ?? Date.now();
-
-    return {
-      type: label ? `${kind} • ${label}` : kind,
-      kind,
-      label,
-      epicName: sourceType || payload.label || payload.key || label,
-      actionType,
-      key: payload.key,
-      value: payload.value,
-      time: timestamp,
-      laneKey,
-      color: payload.color,
-      payload,
-      tabId: msg.tabId,
-      meta: msg.meta,
-      raw: { background: msg, content: data },
-    };
+      return {
+        type: label ? `${kindLabel} • ${label}` : kindLabel,
+        kind: rxKind || 'event',
+        rxKind,
+        label,
+        domain,
+        observableId: devtoolsCandidate.observableId,
+        instanceId: devtoolsCandidate.instanceId,
+        subscriptionId: devtoolsCandidate.subscriptionId,
+        time: timestamp,
+        ts: devtoolsCandidate.ts,
+        data: devtoolsCandidate.data,
+        meta: devtoolsCandidate.meta,
+        source: devtoolsCandidate.source,
+        laneKey,
+        tabId: msg.tabId,
+        raw: { background: msg, content: data, devtools: devtoolsCandidate },
+      };
+    }
+    return null;
   }
 
   renderMessage(msg) {
     const normalized = this.normalizeContentEvent(msg);
     if (normalized) {
       this.pushMarble(normalized);
-      return;
     }
-
-    this.pushMarble(msg);
   }
 
   handlePortDisconnect() {
@@ -1146,15 +1188,31 @@ class MarblePanelRuntime {
   }
 
   startDemoMode() {
+    const demoObservables = ['demo_obs_1', 'demo_obs_2', 'demo_obs_3'];
     this.demoTimer = setInterval(() => {
       if (this.totalEvents > 0) {
         clearInterval(this.demoTimer);
         this.demoTimer = null;
         return;
       }
-      const types = ['NEXT', 'COMPLETE', 'SUBSCRIBE', 'ERROR'];
-      const type = types[Math.floor(Math.random() * types.length)];
-      this.pushMarble({ type, id: Math.floor(Math.random() * 9999) });
+      const kinds = ['subscribe', 'next', 'complete', 'error', 'unsubscribe'];
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      const idx = Math.floor(Math.random() * demoObservables.length);
+      const ts = Date.now();
+      const message = {
+        kind,
+        observableId: demoObservables[idx],
+        instanceId: `demo_inst_${idx + 1}`,
+        subscriptionId: `demo_sub_${idx + 1}`,
+        ts,
+        data: kind === 'next' ? { value: Math.round(Math.random() * 100) } : null,
+        source: {
+          domain: 'demo',
+          label: `Demo ${idx + 1}`,
+          operator: 'demo',
+        },
+      };
+      this.renderMessage({ data: { message } });
     }, 600);
   }
 
@@ -1171,6 +1229,7 @@ class MarblePanelRuntime {
     const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
     const laneSource = msg?.laneKey ?? msg?.label ?? type;
     const laneKey = laneSource == null ? type : String(laneSource);
+    this.updateLaneState(laneKey, msg?.rxKind, msg?.subscriptionId);
     const lane = this.resolveLaneKey(laneKey);
 
     let color = hashColor(type);
@@ -1448,7 +1507,7 @@ function PanelApp() {
     e('input', {
       key: 'filter',
       type: 'text',
-      placeholder: 'Filter type includes… (e.g. NEXT, ERROR)',
+      placeholder: 'Filter label or kind includes (e.g. next, subscribe)',
       value: filterText,
       onChange: (event) => setFilterText(event.target.value),
       style: FILTER_INPUT_STYLE,
@@ -1547,23 +1606,81 @@ function PanelApp() {
                 e(
                   'div',
                   { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Epic:'),
+                  e('span', { style: TIP_LABEL_STYLE }, 'Label:'),
                   e(
                     'span',
                     { style: TIP_PILL_STYLE },
-                    messageInfo?.epicName || 'Unknown epic',
+                    messageInfo?.label || 'Unknown label',
                   ),
                 ),
                 e(
                   'div',
                   { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Action:'),
+                  e('span', { style: TIP_LABEL_STYLE }, 'Kind:'),
                   e(
                     'span',
                     { style: TIP_PILL_STYLE },
-                    messageInfo?.actionType || 'Unknown action',
+                    messageInfo?.kindLabel || 'Unknown kind',
                   ),
                 ),
+                e(
+                  'div',
+                  { style: TIP_ROW_STYLE },
+                  e('span', { style: TIP_LABEL_STYLE }, 'Observable:'),
+                  e(
+                    'span',
+                    { style: TIP_PILL_STYLE },
+                    messageInfo?.observableId || 'Unknown observable',
+                  ),
+                ),
+                messageInfo?.instanceId
+                  ? e(
+                      'div',
+                      { style: TIP_ROW_STYLE },
+                      e('span', { style: TIP_LABEL_STYLE }, 'Instance:'),
+                      e(
+                        'span',
+                        { style: TIP_PILL_STYLE },
+                        messageInfo.instanceId,
+                      ),
+                    )
+                  : null,
+                messageInfo?.subscriptionId
+                  ? e(
+                      'div',
+                      { style: TIP_ROW_STYLE },
+                      e('span', { style: TIP_LABEL_STYLE }, 'Subscription:'),
+                      e(
+                        'span',
+                        { style: TIP_PILL_STYLE },
+                        messageInfo.subscriptionId,
+                      ),
+                    )
+                  : null,
+                messageInfo?.operator
+                  ? e(
+                      'div',
+                      { style: TIP_ROW_STYLE },
+                      e('span', { style: TIP_LABEL_STYLE }, 'Operator:'),
+                      e(
+                        'span',
+                        { style: TIP_PILL_STYLE },
+                        messageInfo.operator,
+                      ),
+                    )
+                  : null,
+                messageInfo?.tags && messageInfo.tags.length
+                  ? e(
+                      'div',
+                      { style: TIP_ROW_STYLE },
+                      e('span', { style: TIP_LABEL_STYLE }, 'Tags:'),
+                      e(
+                        'span',
+                        { style: TIP_PILL_STYLE },
+                        messageInfo.tags.join(', '),
+                      ),
+                    )
+                  : null,
                 e(
                   'div',
                   { style: TIP_ROW_STYLE },
@@ -1577,12 +1694,12 @@ function PanelApp() {
                 e(
                   'div',
                   null,
-                  e('div', { style: TIP_LABEL_STYLE }, 'Action payload:'),
-                  messageInfo?.actionPayload
+                  e('div', { style: TIP_LABEL_STYLE }, 'Data payload:'),
+                  messageInfo && messageInfo.dataPayload !== null && messageInfo.dataPayload !== undefined
                     ? e(
                         'div',
                         { style: { marginTop: '4px' } },
-                        e(ForwardJsonTree, { data: messageInfo.actionPayload }),
+                        e(ForwardJsonTree, { data: messageInfo.dataPayload }),
                       )
                     : e('div', { style: TIP_LABEL_STYLE }, 'None'),
                 ),

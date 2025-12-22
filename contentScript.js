@@ -46,11 +46,25 @@ function forwardToBackground(payload) {
   flushQueue();
 }
 
+function isRxDevtoolsMessage(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.kind === 'string' &&
+    typeof value.observableId === 'string' &&
+    typeof value.instanceId === 'string' &&
+    typeof value.subscriptionId === 'string' &&
+    typeof value.ts === 'number' &&
+    Number.isFinite(value.ts)
+  );
+}
+
 // Listen for messages from the injected page-world hook
 window.addEventListener('message', (e) => {
   if (e.source !== window) return;
   const msg = e.data;
   if (!msg || msg.__from !== 'RXJS_HOOK') return;
+  if (!isRxDevtoolsMessage(msg.message)) return;
 
   try {
     forwardToBackground({
