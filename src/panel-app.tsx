@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from './react';
+import React, { useState, useEffect, useRef } from './react';
 import { MarblePanelRuntime, MAX_AUTO_LANES } from './runtime/MarblePanelRuntime';
 import type { FilterOptions, TooltipState } from './types';
 import { extractMessageInfo } from './utils';
@@ -19,7 +19,6 @@ export function PanelApp() {
   const copyTimerRef = useRef<number | null>(null);
 
   const [running, setRunning] = useState(true);
-  const [lanes, setLanes] = useState(4);
   const [filterText, setFilterText] = useState('');
   const [filterDomain, setFilterDomain] = useState('');
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ domains: [] });
@@ -31,14 +30,6 @@ export function PanelApp() {
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [copyLabel, setCopyLabel] = useState('Copy');
 
-  const handleSyncLaneCount = useCallback((nextLanes: number) => {
-    if (typeof nextLanes !== 'number' || Number.isNaN(nextLanes)) return;
-    setLanes((prev) => {
-      const clamped = Math.max(1, Math.min(MAX_AUTO_LANES, Math.round(nextLanes)));
-      return clamped === prev ? prev : clamped;
-    });
-  }, []);
-
   useEffect(() => {
     const runtime = new MarblePanelRuntime({
       canvasRef,
@@ -47,8 +38,7 @@ export function PanelApp() {
       setTooltipState,
       setPinnedId,
       notifyRunningChange: (value) => setRunning(value),
-      syncLaneCount: handleSyncLaneCount,
-      initialLanes: lanes,
+      initialLanes: 4,
       initialFilter: filterText,
       initialDomainFilter: filterDomain,
       initialRunning: running,
@@ -66,10 +56,6 @@ export function PanelApp() {
   useEffect(() => {
     runtimeRef.current?.setRunningFromReact(running);
   }, [running]);
-
-  useEffect(() => {
-    runtimeRef.current?.setLanes(lanes);
-  }, [lanes]);
 
   useEffect(() => {
     runtimeRef.current?.setFilterText(filterText);
@@ -160,13 +146,10 @@ export function PanelApp() {
     <div style={ROOT_STYLE}>
       <Toolbar
         running={running}
-        lanes={lanes}
-        maxLanes={MAX_AUTO_LANES}
         filterText={filterText}
         statsText={statsText}
         onToggleRunning={handleToggleRunning}
         onClear={handleClear}
-        onLanesChange={setLanes}
         onFilterTextChange={setFilterText}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}

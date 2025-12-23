@@ -19,6 +19,7 @@ const LANE_STROKE_COLOR = '#213145';
 const DISABLED_LANE_STROKE = '#4b5563';
 const DISABLED_MARBLE_COLOR = '#6b7280';
 const LANE_PAD = 24;
+const LANE_MIN_STEP = 24;
 const LANE_GROUP_GAP = 0.7;
 const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
 const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
@@ -247,19 +248,17 @@ class LaneLayout {
   }
 
   setLanes = (value: number) => {
-    const clamped = Math.max(1, Math.min(this.maxAutoLanes, value));
-    this.lanes = clamped;
-    if (this.syncLaneCount && clamped !== value) {
-      this.syncLaneCount(clamped);
+    const next = Math.max(1, value);
+    this.lanes = next;
+    if (this.syncLaneCount && next !== value) {
+      this.syncLaneCount(next);
     }
     this.rebuildLaneIndexMap();
   };
 
   coerceLaneIndex = (index: number) => {
     if (!Number.isFinite(index) || index < 0) return 0;
-    if (this.lanes <= 0) return 0;
-    if (index < this.lanes) return index;
-    return index % this.lanes;
+    return Math.floor(index);
   };
 
   extractLaneParts = (rawKey: string) => {
@@ -337,10 +336,10 @@ class LaneLayout {
 
     const prevLanes = this.lanes;
     const totalLanes = offset > 0 ? offset : prevLanes || 1;
-    const clamped = Math.max(1, Math.min(this.maxAutoLanes, totalLanes));
-    this.lanes = clamped;
-    if (this.syncLaneCount && clamped !== prevLanes) {
-      this.syncLaneCount(clamped);
+    const nextLanes = Math.max(1, totalLanes);
+    this.lanes = nextLanes;
+    if (this.syncLaneCount && nextLanes !== prevLanes) {
+      this.syncLaneCount(nextLanes);
     }
 
     if (reassign) {
@@ -350,7 +349,13 @@ class LaneLayout {
   };
 
   rebuildLaneIndexMap = () => {
-    const laneCount = Math.max(1, this.lanes);
+    const totalLanes = this.groupBoundaries.length
+      ? this.groupBoundaries[this.groupBoundaries.length - 1].end
+      : 0;
+    const laneCount = Math.max(1, Math.max(this.lanes, totalLanes));
+    if (laneCount !== this.lanes) {
+      this.lanes = laneCount;
+    }
     const nextMap = Array.from({ length: laneCount }, () => new Set<string>());
 
     for (const domain of this.domainOrder) {
@@ -384,7 +389,8 @@ class LaneLayout {
     const inner = Math.max(1, height - pad * 2);
     const groupCount = Math.max(1, this.groupBoundaries.length || 1);
     const virtualLanes = this.lanes + Math.max(0, groupCount - 1) * LANE_GROUP_GAP;
-    const step = inner / Math.max(1, virtualLanes);
+    const fitStep = inner / Math.max(1, virtualLanes);
+    const step = Math.max(LANE_MIN_STEP, fitStep);
     return { pad, step };
   };
 

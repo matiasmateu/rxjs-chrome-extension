@@ -79,10 +79,6 @@ export const TITLE_STYLE = {
   letterSpacing: '0.3px',
 };
 
-export const LANES_LABEL_STYLE = {
-  opacity: 0.8,
-};
-
 export const FILTER_INPUT_STYLE = {
   flex: 1,
   minWidth: '160px',
