@@ -1,4 +1,6 @@
-const { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } = React;
+import React, { useState, useEffect, useRef, useCallback, useMemo } from './vendor/react.esm.js';
+import { createRoot } from './vendor/react-dom.esm.js';
+
 const e = React.createElement;
 
 const ROOT_STYLE = {
@@ -42,8 +44,32 @@ const SMALL_BTN_STYLE = {
 };
 
 const STAGE_STYLE = {
-  position: 'relative',
+  display: 'flex',
+  minHeight: 0,
   overflow: 'hidden',
+};
+
+const CANVAS_STAGE_STYLE = {
+  position: 'relative',
+  flex: '1 1 auto',
+  overflow: 'hidden',
+  minWidth: 0,
+};
+
+const RIGHT_PANEL_STYLE = {
+  flex: '0 0 320px',
+  display: 'flex',
+  flexDirection: 'column',
+  borderLeft: '1px solid #1d2733',
+  background: '#0d131a',
+  minWidth: '260px',
+  minHeight: 0,
+};
+
+const RIGHT_PANEL_EMPTY_STYLE = {
+  padding: '12px',
+  fontSize: '12px',
+  opacity: 0.7,
 };
 
 const LEGEND_STYLE = {
@@ -78,19 +104,16 @@ const STATS_STYLE = {
 };
 
 const TIP_STYLE = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  display: 'none',
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1 1 auto',
+  margin: '12px',
   background: 'rgba(16,24,32,.98)',
   border: '1px solid #334155',
   boxShadow: '0 6px 28px rgba(0,0,0,.5)',
   borderRadius: '12px',
-  maxWidth: '560px',
-  maxHeight: '70vh',
   overflow: 'hidden',
-  zIndex: 2,
-  backdropFilter: 'blur(4px)',
+  minHeight: 0,
 };
 
 const TIP_HEADER_STYLE = {
@@ -117,9 +140,10 @@ const TIP_BTNS_STYLE = {
 };
 
 const TIP_SCROLL_STYLE = {
-  maxHeight: 'calc(70vh - 38px)',
+  flex: '1 1 auto',
   overflow: 'auto',
   padding: '10px 12px',
+  minHeight: 0,
 };
 
 const TIP_CONTENT_STYLE = {
@@ -209,6 +233,11 @@ const MAX_AUTO_LANES = 128;
 const LANE_STROKE_COLOR = '#213145';
 const DISABLED_LANE_STROKE = '#4b5563';
 const DISABLED_MARBLE_COLOR = '#6b7280';
+const LANE_PAD = 24;
+const LANE_GROUP_GAP = 0.7;
+const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
+const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
+const LANE_GROUP_SEPARATOR = '#2a3b52';
 
 function hashColor(str) {
   let h = 2166136261 >>> 0;
@@ -281,6 +310,13 @@ function normalizeRxKind(value) {
   return value.trim().toLowerCase();
 }
 
+function sanitizeLaneKeyPart(value) {
+  if (value == null) return 'unknown';
+  const str = String(value).trim();
+  if (!str) return 'unknown';
+  return str.replace(/\//g, '_');
+}
+
 function isRxDevtoolsMessage(value) {
   return (
     value &&
@@ -341,6 +377,72 @@ function previewValue(v) {
 function truncate(s, n) {
   if (!s) return '';
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+
+function drawRxKindGlyph(ctx, rawKind, x, y, r, color) {
+  const kind = normalizeRxKind(rawKind);
+  const size = r + 2;
+  const shadow = 'rgba(0,0,0,.35)';
+
+  if (kind === 'subscribe' || kind === 'create') {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x - size, y + size);
+    ctx.lineTo(x + size, y + size);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = shadow;
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === 'complete' || kind === 'unsubscribe') {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = shadow;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x - size, y);
+    ctx.lineTo(x + size, y);
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x - size, y);
+    ctx.lineTo(x + size, y);
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === 'error') {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = shadow;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x - size, y - size);
+    ctx.lineTo(x + size, y + size);
+    ctx.moveTo(x + size, y - size);
+    ctx.lineTo(x - size, y + size);
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x - size, y - size);
+    ctx.lineTo(x + size, y + size);
+    ctx.moveTo(x + size, y - size);
+    ctx.lineTo(x - size, y + size);
+    ctx.stroke();
+    return;
+  }
+
+  ctx.beginPath();
+  ctx.fillStyle = color;
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = shadow;
+  ctx.stroke();
 }
 
 function buildJsonNodes(key, value, depth, visited) {
@@ -503,6 +605,9 @@ class MarblePanelRuntime {
     this.laneStatus = new Map();
     this.subscriptionState = new Map();
     this.laneIndexMap = [];
+    this.groupBoundaries = [];
+    this.groupIndexByLane = [];
+    this.groupLabels = new Map();
 
     this.hoverId = null;
     this.pinnedId = null;
@@ -687,13 +792,14 @@ class MarblePanelRuntime {
     if (!laneKey) return;
     const rxKind = normalizeRxKind(kind);
     if (!rxKind) return;
+    const subscriptionKey = subscriptionId ? `${laneKey}::${subscriptionId}` : null;
 
-    if (rxKind === 'subscribe') {
+    if (rxKind === 'subscribe' || rxKind === 'create') {
       const state = this.laneStatus.get(laneKey) || { activeCount: 0, disabled: false };
-      if (subscriptionId) {
-        const existing = this.subscriptionState.get(subscriptionId);
+      if (subscriptionKey) {
+        const existing = this.subscriptionState.get(subscriptionKey);
         if (!existing || !existing.active) {
-          this.subscriptionState.set(subscriptionId, { laneKey, active: true });
+          this.subscriptionState.set(subscriptionKey, { laneKey, active: true });
           state.activeCount += 1;
         }
       } else {
@@ -708,16 +814,16 @@ class MarblePanelRuntime {
       rxKind === 'complete' || rxKind === 'error' || rxKind === 'unsubscribe';
     if (!isTerminal) return;
 
-    const sub = subscriptionId ? this.subscriptionState.get(subscriptionId) : null;
+    const sub = subscriptionKey ? this.subscriptionState.get(subscriptionKey) : null;
     const targetLaneKey = sub?.laneKey || laneKey;
     const state = this.laneStatus.get(targetLaneKey) || { activeCount: 0, disabled: false };
 
-    if (subscriptionId && sub) {
+    if (subscriptionKey && sub) {
       if (sub.active) {
         state.activeCount = Math.max(0, state.activeCount - 1);
       }
-      this.subscriptionState.delete(subscriptionId);
-    } else if (!subscriptionId || rxKind !== 'unsubscribe') {
+      this.subscriptionState.delete(subscriptionKey);
+    } else if (!subscriptionKey || rxKind !== 'unsubscribe') {
       state.activeCount = Math.max(0, state.activeCount - 1);
     }
 
@@ -748,11 +854,21 @@ class MarblePanelRuntime {
     return hasState;
   }
 
-  laneY(lane) {
-    const pad = 24;
+  laneMetrics() {
+    const pad = LANE_PAD;
     const inner = Math.max(1, this.height - pad * 2);
-    const step = inner / Math.max(1, this.lanes);
-    return pad + (lane + 0.5) * step;
+    const groupCount = Math.max(1, this.groupBoundaries.length || 1);
+    const virtualLanes =
+      this.lanes + Math.max(0, groupCount - 1) * LANE_GROUP_GAP;
+    const step = inner / Math.max(1, virtualLanes);
+    return { pad, step };
+  }
+
+  laneY(lane) {
+    const { pad, step } = this.laneMetrics();
+    const groupIndex = this.groupIndexByLane[lane] ?? 0;
+    const virtualIndex = lane + groupIndex * LANE_GROUP_GAP;
+    return pad + (virtualIndex + 0.5) * step;
   }
 
   xForTime(ms) {
@@ -777,6 +893,7 @@ class MarblePanelRuntime {
     if (!this.ctx) return;
 
     const ctx = this.ctx;
+    ctx.lineCap = 'butt';
     const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
     gradient.addColorStop(0, '#0b0f14');
     gradient.addColorStop(1, '#0a131d');
@@ -810,6 +927,37 @@ class MarblePanelRuntime {
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
       ctx.stroke();
+    }
+
+    if (this.groupBoundaries.length > 1) {
+      ctx.strokeStyle = LANE_GROUP_SEPARATOR;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]);
+      for (let i = 1; i < this.groupBoundaries.length; i++) {
+        const start = this.groupBoundaries[i].start;
+        const y = (this.laneY(start - 1) + this.laneY(start)) / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(this.width, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+    }
+
+    if (this.groupBoundaries.length) {
+      ctx.fillStyle = LANE_GROUP_LABEL_COLOR;
+      ctx.font = LANE_GROUP_LABEL_FONT;
+      ctx.textAlign = 'left';
+      for (const group of this.groupBoundaries) {
+        const label = this.groupLabels.get(group.key) || group.key;
+        const display = `Observable: ${truncate(label, 26)}`;
+        const startY = this.laneY(group.start);
+        const endY = this.laneY(Math.max(group.start, group.end - 1));
+        let y = (startY + endY) / 2;
+        if (group.size <= 1) y -= 8;
+        ctx.fillText(display, 8, y);
+      }
     }
 
     ctx.fillStyle = '#7aa2d3';
@@ -850,13 +998,8 @@ class MarblePanelRuntime {
       const y = baseY * this.yZoom + (1 - this.yZoom) * this.height * 0.5;
 
       const laneDisabled = this.isLaneDisabledForKey(marble.laneKey);
-      ctx.beginPath();
-      ctx.fillStyle = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
-      ctx.arc(x, y, marble.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(0,0,0,.35)';
-      ctx.stroke();
+      const color = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
+      drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
 
       const dx = this.mouse.x - x;
       const dy = this.mouse.y - y;
@@ -999,6 +1142,22 @@ class MarblePanelRuntime {
     return { key, domain: normalizedDomain };
   }
 
+  registerGroupLabel(laneKey, msg) {
+    const { domain } = this.extractLaneParts(laneKey);
+    if (!domain) return;
+    const existing = this.groupLabels.get(domain);
+    if (existing && existing !== domain) return;
+    const label = firstString(
+      msg?.observableId,
+      msg?.label,
+      msg?.instanceId,
+      domain,
+    );
+    if (label) {
+      this.groupLabels.set(domain, label);
+    }
+  }
+
   getLaneIndexForKey(rawKey, createIfMissing) {
     const { key, domain } = this.extractLaneParts(rawKey);
     let info = this.domainMap.get(domain);
@@ -1030,13 +1189,24 @@ class MarblePanelRuntime {
 
   updateLaneStructure(reassign) {
     let offset = 0;
+    const boundaries = [];
+    const groupIndexByLane = [];
+    let groupIndex = 0;
     for (const domain of this.domainOrder) {
       const info = this.domainMap.get(domain);
       if (!info) continue;
       const size = Math.max(1, info.actions.size || 0);
       info.baseOffset = offset;
+      boundaries.push({ key: domain, start: offset, end: offset + size, size });
+      for (let i = 0; i < size; i++) {
+        groupIndexByLane[offset + i] = groupIndex;
+      }
       offset += size;
+      groupIndex += 1;
     }
+
+    this.groupBoundaries = boundaries;
+    this.groupIndexByLane = groupIndexByLane;
 
     const prevLanes = this.lanes;
     const totalLanes = offset > 0 ? offset : prevLanes || 1;
@@ -1078,6 +1248,9 @@ class MarblePanelRuntime {
     this.laneStatus.clear();
     this.subscriptionState.clear();
     this.laneIndexMap = [];
+    this.groupBoundaries = [];
+    this.groupIndexByLane = [];
+    this.groupLabels.clear();
     this.filterDomains.clear();
     if (this.notifyFilterOptions) {
       this.notifyFilterOptions({ domains: [] });
@@ -1106,9 +1279,15 @@ class MarblePanelRuntime {
       );
       const domainRaw = firstString(source.domain);
       const domain = (domainRaw || 'unknown').toLowerCase();
-      const observableKey =
-        devtoolsCandidate.observableId || devtoolsCandidate.instanceId || label || kindLabel;
-      const laneKey = domain ? `${domain}/${observableKey}` : observableKey;
+      const observableLabel =
+        devtoolsCandidate.observableId || label || devtoolsCandidate.instanceId || kindLabel;
+      const observableKey = sanitizeLaneKeyPart(
+        domain ? `${domain}:${observableLabel}` : observableLabel,
+      );
+      const subscriptionLabel =
+        devtoolsCandidate.subscriptionId || devtoolsCandidate.instanceId || 'default';
+      const subscriptionKey = sanitizeLaneKeyPart(subscriptionLabel);
+      const laneKey = `${observableKey}/${subscriptionKey}`;
       const timestamp =
         pickFirstNumber(
           devtoolsCandidate.ts,
@@ -1229,6 +1408,7 @@ class MarblePanelRuntime {
     const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
     const laneSource = msg?.laneKey ?? msg?.label ?? type;
     const laneKey = laneSource == null ? type : String(laneSource);
+    this.registerGroupLabel(laneKey, msg);
     this.updateLaneState(laneKey, msg?.rxKind, msg?.subscriptionId);
     const lane = this.resolveLaneKey(laneKey);
 
@@ -1277,8 +1457,6 @@ function PanelApp() {
   const [pinnedId, setPinnedId] = useState(null);
   const [copyLabel, setCopyLabel] = useState('Copy');
   const copyTimerRef = useRef(null);
-  const [stageSizeVersion, setStageSizeVersion] = useState(0);
-  const [tooltipRenderStyle, setTooltipRenderStyle] = useState({ display: 'none', transform: 'translate(0px,0px)' });
 
   const handleSyncLaneCount = useCallback((nextLanes) => {
     if (typeof nextLanes !== 'number' || Number.isNaN(nextLanes)) return;
@@ -1314,15 +1492,6 @@ function PanelApp() {
   }, []);
 
   useEffect(() => {
-    if (!stageRef.current) return;
-    const observer = new ResizeObserver(() => {
-      setStageSizeVersion((v) => v + 1);
-    });
-    observer.observe(stageRef.current);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
     runtimeRef.current?.setRunningFromReact(running);
   }, [running]);
 
@@ -1338,36 +1507,6 @@ function PanelApp() {
     runtimeRef.current?.setFilterDomain(filterDomain);
   }, [filterDomain]);
 
-  useLayoutEffect(() => {
-    const tipEl = tooltipRef.current;
-    const stageEl = stageRef.current;
-    if (!tipEl || !stageEl) return;
-
-    if (!tooltipState.visible) {
-      setTooltipRenderStyle((prev) =>
-        prev.display === 'none'
-          ? prev
-          : { display: 'none', transform: 'translate(0px,0px)' },
-      );
-      return;
-    }
-
-    const stageRect = stageEl.getBoundingClientRect();
-    const tipW = tipEl.offsetWidth || 0;
-    const tipH = tipEl.offsetHeight || 0;
-    const rawX = tooltipState.position?.x ?? 0;
-    const rawY = tooltipState.position?.y ?? 0;
-
-    const px = Math.min(stageRect.width - 20 - tipW, Math.max(20, rawX + 16));
-    const py = Math.max(10, Math.min(stageRect.height - tipH - 10, rawY - 40));
-    const transform = `translate(${px}px, ${py}px)`;
-
-    setTooltipRenderStyle((prev) =>
-      prev.display === 'block' && prev.transform === transform
-        ? prev
-        : { display: 'block', transform },
-    );
-  }, [tooltipState, stageSizeVersion]);
 
   useEffect(() => () => {
     if (copyTimerRef.current) {
@@ -1517,6 +1656,9 @@ function PanelApp() {
   ];
 
   const messageInfo = tooltipState.message ? extractMessageInfo(tooltipState.message) : null;
+  const tooltipTitle = tooltipState.visible
+    ? tooltipState.title || 'Event details'
+    : 'Event details';
 
   const tooltipButtons = [
     e(
@@ -1572,150 +1714,162 @@ function PanelApp() {
     ),
     e(
       'div',
-      { ref: stageRef, style: STAGE_STYLE },
-      e('canvas', { ref: canvasRef }),
+      { style: STAGE_STYLE },
       e(
         'div',
-        {
-          ref: tooltipRef,
-          style: { ...TIP_STYLE, ...tooltipRenderStyle },
-        },
+        { ref: stageRef, style: CANVAS_STAGE_STYLE },
+        e('canvas', { ref: canvasRef }),
+      ),
+      e(
+        'div',
+        { style: RIGHT_PANEL_STYLE },
         e(
           'div',
-          { style: TIP_HEADER_STYLE },
-          e('div', { style: TIP_TITLE_STYLE }, tooltipState.title || ''),
-          e('div', { style: TIP_BTNS_STYLE }, tooltipButtons),
-        ),
-        e(
-          'div',
-          { style: TIP_SCROLL_STYLE },
-          tooltipState.visible && tooltipState.message
-            ? e(
-                'div',
-                { style: TIP_CONTENT_STYLE },
-                e(
+          {
+            ref: tooltipRef,
+            style: TIP_STYLE,
+          },
+          e(
+            'div',
+            { style: TIP_HEADER_STYLE },
+            e('div', { style: TIP_TITLE_STYLE }, tooltipTitle),
+            e('div', { style: TIP_BTNS_STYLE }, tooltipButtons),
+          ),
+          e(
+            'div',
+            { style: TIP_SCROLL_STYLE },
+            tooltipState.visible && tooltipState.message
+              ? e(
                   'div',
-                  { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Domain:'),
+                  { style: TIP_CONTENT_STYLE },
                   e(
-                    'span',
-                    { style: TIP_PILL_STYLE },
-                    messageInfo?.domainLabel || 'Unknown domain',
+                    'div',
+                    { style: TIP_ROW_STYLE },
+                    e('span', { style: TIP_LABEL_STYLE }, 'Domain:'),
+                    e(
+                      'span',
+                      { style: TIP_PILL_STYLE },
+                      messageInfo?.domainLabel || 'Unknown domain',
+                    ),
                   ),
-                ),
-                e(
-                  'div',
-                  { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Label:'),
                   e(
-                    'span',
-                    { style: TIP_PILL_STYLE },
-                    messageInfo?.label || 'Unknown label',
+                    'div',
+                    { style: TIP_ROW_STYLE },
+                    e('span', { style: TIP_LABEL_STYLE }, 'Label:'),
+                    e(
+                      'span',
+                      { style: TIP_PILL_STYLE },
+                      messageInfo?.label || 'Unknown label',
+                    ),
                   ),
-                ),
-                e(
-                  'div',
-                  { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Kind:'),
                   e(
-                    'span',
-                    { style: TIP_PILL_STYLE },
-                    messageInfo?.kindLabel || 'Unknown kind',
+                    'div',
+                    { style: TIP_ROW_STYLE },
+                    e('span', { style: TIP_LABEL_STYLE }, 'Kind:'),
+                    e(
+                      'span',
+                      { style: TIP_PILL_STYLE },
+                      messageInfo?.kindLabel || 'Unknown kind',
+                    ),
                   ),
-                ),
-                e(
-                  'div',
-                  { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Observable:'),
                   e(
-                    'span',
-                    { style: TIP_PILL_STYLE },
-                    messageInfo?.observableId || 'Unknown observable',
+                    'div',
+                    { style: TIP_ROW_STYLE },
+                    e('span', { style: TIP_LABEL_STYLE }, 'Observable:'),
+                    e(
+                      'span',
+                      { style: TIP_PILL_STYLE },
+                      messageInfo?.observableId || 'Unknown observable',
+                    ),
                   ),
-                ),
-                messageInfo?.instanceId
-                  ? e(
-                      'div',
-                      { style: TIP_ROW_STYLE },
-                      e('span', { style: TIP_LABEL_STYLE }, 'Instance:'),
-                      e(
-                        'span',
-                        { style: TIP_PILL_STYLE },
-                        messageInfo.instanceId,
-                      ),
-                    )
-                  : null,
-                messageInfo?.subscriptionId
-                  ? e(
-                      'div',
-                      { style: TIP_ROW_STYLE },
-                      e('span', { style: TIP_LABEL_STYLE }, 'Subscription:'),
-                      e(
-                        'span',
-                        { style: TIP_PILL_STYLE },
-                        messageInfo.subscriptionId,
-                      ),
-                    )
-                  : null,
-                messageInfo?.operator
-                  ? e(
-                      'div',
-                      { style: TIP_ROW_STYLE },
-                      e('span', { style: TIP_LABEL_STYLE }, 'Operator:'),
-                      e(
-                        'span',
-                        { style: TIP_PILL_STYLE },
-                        messageInfo.operator,
-                      ),
-                    )
-                  : null,
-                messageInfo?.tags && messageInfo.tags.length
-                  ? e(
-                      'div',
-                      { style: TIP_ROW_STYLE },
-                      e('span', { style: TIP_LABEL_STYLE }, 'Tags:'),
-                      e(
-                        'span',
-                        { style: TIP_PILL_STYLE },
-                        messageInfo.tags.join(', '),
-                      ),
-                    )
-                  : null,
-                e(
-                  'div',
-                  { style: TIP_ROW_STYLE },
-                  e('span', { style: TIP_LABEL_STYLE }, 'Time:'),
-                  e(
-                    'span',
-                    { style: TIP_PILL_STYLE },
-                    messageInfo?.timeLabel || 'Unknown time',
-                  ),
-                ),
-                e(
-                  'div',
-                  null,
-                  e('div', { style: TIP_LABEL_STYLE }, 'Data payload:'),
-                  messageInfo && messageInfo.dataPayload !== null && messageInfo.dataPayload !== undefined
+                  messageInfo?.instanceId
                     ? e(
                         'div',
-                        { style: { marginTop: '4px' } },
-                        e(ForwardJsonTree, { data: messageInfo.dataPayload }),
+                        { style: TIP_ROW_STYLE },
+                        e('span', { style: TIP_LABEL_STYLE }, 'Instance:'),
+                        e(
+                          'span',
+                          { style: TIP_PILL_STYLE },
+                          messageInfo.instanceId,
+                        ),
                       )
-                    : e('div', { style: TIP_LABEL_STYLE }, 'None'),
+                    : null,
+                  messageInfo?.subscriptionId
+                    ? e(
+                        'div',
+                        { style: TIP_ROW_STYLE },
+                        e('span', { style: TIP_LABEL_STYLE }, 'Subscription:'),
+                        e(
+                          'span',
+                          { style: TIP_PILL_STYLE },
+                          messageInfo.subscriptionId,
+                        ),
+                      )
+                    : null,
+                  messageInfo?.operator
+                    ? e(
+                        'div',
+                        { style: TIP_ROW_STYLE },
+                        e('span', { style: TIP_LABEL_STYLE }, 'Operator:'),
+                        e(
+                          'span',
+                          { style: TIP_PILL_STYLE },
+                          messageInfo.operator,
+                        ),
+                      )
+                    : null,
+                  messageInfo?.tags && messageInfo.tags.length
+                    ? e(
+                        'div',
+                        { style: TIP_ROW_STYLE },
+                        e('span', { style: TIP_LABEL_STYLE }, 'Tags:'),
+                        e(
+                          'span',
+                          { style: TIP_PILL_STYLE },
+                          messageInfo.tags.join(', '),
+                        ),
+                      )
+                    : null,
+                  e(
+                    'div',
+                    { style: TIP_ROW_STYLE },
+                    e('span', { style: TIP_LABEL_STYLE }, 'Time:'),
+                    e(
+                      'span',
+                      { style: TIP_PILL_STYLE },
+                      messageInfo?.timeLabel || 'Unknown time',
+                    ),
+                  ),
+                  e(
+                    'div',
+                    null,
+                    e('div', { style: TIP_LABEL_STYLE }, 'Data payload:'),
+                    messageInfo && messageInfo.dataPayload !== null && messageInfo.dataPayload !== undefined
+                      ? e(
+                          'div',
+                          { style: { marginTop: '4px' } },
+                          e(ForwardJsonTree, { data: messageInfo.dataPayload }),
+                        )
+                      : e('div', { style: TIP_LABEL_STYLE }, 'None'),
+                  ),
+                )
+              : e(
+                  'div',
+                  { style: RIGHT_PANEL_EMPTY_STYLE },
+                  'Hover a marble to see details.',
                 ),
-              )
-            : e('div', null, 'No data'),
+          ),
         ),
       ),
     ),
     e(
       'div',
       { style: LEGEND_STYLE },
-      'Tip: hover for data • click to pin • wheel to zoom Y • drag to pan • Space Play/Pause',
+      'Tip: hover for data • click to pin • wheel to zoom Y • drag to pan • Space Play/Pause • Shapes: triangle=subscribe/create, circle=next, line=complete/unsubscribe, x=error',
     ),
   );
 }
 
 const rootElement = document.getElementById('root');
-const root = ReactDOM.createRoot(rootElement);
+const root = createRoot(rootElement);
 root.render(e(PanelApp));
