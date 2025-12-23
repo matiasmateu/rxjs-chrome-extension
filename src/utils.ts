@@ -24,7 +24,8 @@ export function fmtTime(ms: number): string {
   const h = String(d.getHours()).padStart(2, '0');
   const m = String(d.getMinutes()).padStart(2, '0');
   const s = String(d.getSeconds()).padStart(2, '0');
-  return `${h}:${m}:${s}`;
+  const msPart = String(d.getMilliseconds()).padStart(3, '0');
+  return `${h}:${m}:${s}.${msPart}`;
 }
 
 export function firstString(...values: unknown[]): string {
@@ -154,9 +155,9 @@ export function drawRxKindGlyph(
 
   if (kind === 'subscribe' || kind === 'create') {
     ctx.beginPath();
-    ctx.moveTo(x, y - size);
+    ctx.moveTo(x + size, y);
+    ctx.lineTo(x - size, y - size);
     ctx.lineTo(x - size, y + size);
-    ctx.lineTo(x + size, y + size);
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
@@ -171,14 +172,14 @@ export function drawRxKindGlyph(
     ctx.strokeStyle = shadow;
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(x - size, y);
-    ctx.lineTo(x + size, y);
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x, y + size);
     ctx.stroke();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(x - size, y);
-    ctx.lineTo(x + size, y);
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x, y + size);
     ctx.stroke();
     return;
   }

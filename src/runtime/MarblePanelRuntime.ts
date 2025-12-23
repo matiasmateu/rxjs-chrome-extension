@@ -24,7 +24,7 @@ const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
 const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
 const LANE_GROUP_SEPARATOR = '#2a3b52';
 const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 20;
+const ZOOM_MAX = 50;
 const ZOOM_IN_FACTOR = 1.1;
 const ZOOM_OUT_FACTOR = 0.9;
 
@@ -475,7 +475,8 @@ export class MarblePanelRuntime {
     e.preventDefault();
     const delta = Math.sign(e.deltaY);
     const factor = delta > 0 ? ZOOM_OUT_FACTOR : ZOOM_IN_FACTOR;
-    this.zoomByFactor(factor);
+    const anchorX = this.getAnchorXFromEvent(e);
+    this.zoomAtX(anchorX, factor);
   };
 
   handleCanvasClick = () => {
@@ -504,16 +505,35 @@ export class MarblePanelRuntime {
     this.xZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
   };
 
+  zoomAtX = (anchorX: number, factor: number) => {
+    const prevZoom = this.xZoom;
+    const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prevZoom * factor));
+    if (nextZoom === prevZoom) return;
+    const anchor = Number.isFinite(anchorX) ? anchorX : this.width * 0.5;
+    const anchorOffset = this.width - NOW_MARKER_OFFSET - anchor;
+    const dtSec = (anchorOffset + this.worldOffsetPx) / (PX_PER_SEC * prevZoom);
+    this.xZoom = nextZoom;
+    this.worldOffsetPx = -anchorOffset + dtSec * PX_PER_SEC * nextZoom;
+  };
+
   zoomByFactor = (factor: number) => {
     this.setZoom(this.xZoom * factor);
   };
 
   zoomIn = () => {
-    this.zoomByFactor(ZOOM_IN_FACTOR);
+    this.zoomAtX(this.width * 0.5, ZOOM_IN_FACTOR);
   };
 
   zoomOut = () => {
-    this.zoomByFactor(ZOOM_OUT_FACTOR);
+    this.zoomAtX(this.width * 0.5, ZOOM_OUT_FACTOR);
+  };
+
+  getAnchorXFromEvent = (e: WheelEvent) => {
+    if (!this.canvas) return this.width * 0.5;
+    const rect = this.canvas.getBoundingClientRect();
+    const anchorX = e.clientX - rect.left;
+    const maxX = Math.max(1, this.width);
+    return Math.max(0, Math.min(maxX, anchorX));
   };
 
   frame = () => {
