@@ -23,6 +23,9 @@ const LANE_GROUP_GAP = 0.7;
 const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
 const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
 const LANE_GROUP_SEPARATOR = '#2a3b52';
+const SELECTED_RING_COLOR = 'rgba(147, 197, 253, 0.9)';
+const SELECTED_GLOW_COLOR = 'rgba(59, 130, 246, 0.6)';
+const HOVER_ICON_COLOR = '#dbeafe';
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 50;
 const ZOOM_IN_FACTOR = 1.1;
@@ -832,14 +835,28 @@ export class MarblePanelRuntime {
       const y = this.laneY(marble.lane);
 
       const laneDisabled = this.laneActivity.isLaneDisabled(marble.laneKey);
-      const color = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
-      drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
-
       const dx = this.mouse.x - x;
       const dy = this.mouse.y - y;
-      if (dx * dx + dy * dy < (marble.r + 6) * (marble.r + 6)) {
+      const isHover = dx * dx + dy * dy < (marble.r + 6) * (marble.r + 6);
+      if (isHover) {
         this.hoverId = marble.id;
       }
+      const isPinned = this.pinnedId === marble.id;
+      if (isPinned) {
+        const ringRadius = marble.r + 7;
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = SELECTED_RING_COLOR;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = SELECTED_GLOW_COLOR;
+        ctx.shadowBlur = 12;
+        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      const baseColor = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
+      const color = isHover && !isPinned ? HOVER_ICON_COLOR : baseColor;
+      drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
     }
   }
 
