@@ -578,6 +578,8 @@ export class MarblePanelRuntime {
   hoverId: number | null;
   pinnedId: number | null;
   lastTooltipPayload: TooltipState | null;
+  
+  filteredLaneMap: Map<number, number>;
 
   mouse: { x: number; y: number; down: boolean };
   dragStart: { x: number; y: number; offsetX: number; offsetY: number } | null;
@@ -752,6 +754,7 @@ export class MarblePanelRuntime {
     this.hoverId = null;
     this.pinnedId = null;
     this.lastTooltipPayload = null;
+    this.filteredLaneMap = new Map();
 
     this.mouse = { x: 0, y: 0, down: false };
     this.dragStart = null;
@@ -923,10 +926,56 @@ export class MarblePanelRuntime {
       ctx.font = '11px ui-sans-serif, system-ui';
       ctx.textAlign = 'left';
       
+      // Create a filtered lane mapping when domain filter is active
+      this.filteredLaneMap.clear();
+      let filteredLaneIndex = 0;
+      
+      if (this.filters.filterDomain) {
+        for (let lane = 0; lane < this.laneLayout.lanes; lane++) {
+          const laneKeys = this.laneLayout.laneIndexMap[lane];
+          if (!laneKeys || laneKeys.size === 0) continue;
+          
+          // Check if this lane has any marbles that match the filter
+          let hasMatch = false;
+          for (const key of laneKeys) {
+            const sampleMarble = this.marbles.find(m => m.laneKey === key);
+            if (sampleMarble && this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
+              hasMatch = true;
+              break;
+            }
+          }
+          
+          if (hasMatch) {
+            this.filteredLaneMap.set(lane, filteredLaneIndex);
+            filteredLaneIndex++;
+          }
+        }
+      }
+      
       for (const group of this.laneLayout.groupBoundaries) {
         // For single-lane groups, use the group label directly
         if (group.size === 1) {
-          const laneY = this.laneY(group.start);
+          // Check if this lane has any marbles that match the filter
+          const laneKeys = this.laneLayout.laneIndexMap[group.start];
+          if (!laneKeys || laneKeys.size === 0) continue;
+          
+          // Check if any marble on this lane matches the domain filter
+          let hasMatchingMarble = false;
+          for (const key of laneKeys) {
+            const sampleMarble = this.marbles.find(m => m.laneKey === key);
+            if (sampleMarble && this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
+              hasMatchingMarble = true;
+              break;
+            }
+          }
+          
+          if (!hasMatchingMarble && this.filters.filterDomain) continue;
+          
+          // Use filtered lane index if domain filter is active
+          const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(group.start) 
+            ? this.filteredLaneMap.get(group.start)! 
+            : group.start;
+          const laneY = this.laneY(displayLane);
           const label = this.laneLayout.groupLabels.get(group.key) || group.key;
           const isDisabled = this.laneActivity.isLaneDisabledForIndex(group.start, this.laneLayout.laneIndexMap);
           
@@ -961,7 +1010,17 @@ export class MarblePanelRuntime {
           
           // Draw each subscription
           for (const { key, absoluteLane } of allObservablesInGroup) {
-            const laneY = this.laneY(absoluteLane);
+            // Check if this lane has any marbles that match the filter
+            const sampleMarble = this.marbles.find(m => m.laneKey === key);
+            if (this.filters.filterDomain && (!sampleMarble || !this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters))) {
+              continue;
+            }
+            
+            // Use filtered lane index if domain filter is active
+            const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(absoluteLane)
+              ? this.filteredLaneMap.get(absoluteLane)!
+              : absoluteLane;
+            const laneY = this.laneY(displayLane);
             const isDisabled = this.laneActivity.isLaneDisabledForIndex(absoluteLane, this.laneLayout.laneIndexMap);
             
             // Draw dashed line
@@ -1017,7 +1076,11 @@ export class MarblePanelRuntime {
 
       if (!this.filters.matches(label, tags)) continue;
 
-      const y = this.laneY(marble.lane);
+      // Use filtered lane position if domain filter is active
+      const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(marble.lane)
+        ? this.filteredLaneMap.get(marble.lane)!
+        : marble.lane;
+      const y = this.laneY(displayLane);
 
       const laneDisabled = this.laneActivity.isLaneDisabled(marble.laneKey);
       const dx = this.mouse.x - x;
@@ -1127,6 +1190,8 @@ export class MarblePanelRuntime {
 
   setFilterDomain(value: string) {
     this.filters.setDomain(value);
+    // Reset vertical offset to center view on filtered subscriptions
+    this.worldOffsetPy = 0;
   }
 
   clear() {
