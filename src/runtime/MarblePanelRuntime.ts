@@ -19,7 +19,7 @@ const LANE_STROKE_COLOR = '#213145';
 const DISABLED_LANE_STROKE = '#4b5563';
 const DISABLED_MARBLE_COLOR = '#6b7280';
 const LANE_PAD = 24;
-const LANE_MIN_STEP = 24;
+const LANE_MIN_STEP = 40;
 const LANE_GROUP_GAP = 0.7;
 const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
 const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
@@ -53,6 +53,7 @@ type RuntimeOptions = {
 type DomainInfo = {
   actions: Map<string, number>;
   baseOffset: number;
+  metadata: Map<string, { tags: string[]; label: string }>;
 };
 
 type LaneStatus = {
@@ -270,7 +271,7 @@ class LaneLayout {
   };
 
   registerGroupLabel = (laneKey: string, msg: any) => {
-    const { domain } = this.extractLaneParts(laneKey);
+    const { key, domain } = this.extractLaneParts(laneKey);
     if (!domain) return;
     const existing = this.groupLabels.get(domain);
     if (existing && existing !== domain) return;
@@ -278,28 +279,44 @@ class LaneLayout {
     if (label) {
       this.groupLabels.set(domain, label);
     }
+    
+    // Store tags and label metadata for sorting
+    // Always update metadata to ensure we have the latest tags
+    const info = this.domainMap.get(domain);
+    if (info) {
+      const tags = msg?.source?.tags || [];
+      info.metadata.set(key, { tags: Array.isArray(tags) ? tags : [], label: label || key });
+    }
   };
 
-  resolveLaneKey = (rawKey: string, marbles: Marble[]) => {
-    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true, marbles));
+  resolveLaneKey = (rawKey: string, marbles: Marble[], msg?: any) => {
+    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true, marbles, msg));
   };
 
-  getLaneIndexForKey = (rawKey: string, createIfMissing: boolean, marbles: Marble[] = []) => {
+  getLaneIndexForKey = (rawKey: string, createIfMissing: boolean, marbles: Marble[] = [], msg?: any) => {
     const { key, domain } = this.extractLaneParts(rawKey);
     let info = this.domainMap.get(domain);
     let changed = false;
 
     if (!info) {
       if (!createIfMissing) return 0;
-      info = { actions: new Map(), baseOffset: 0 };
+      info = { actions: new Map(), baseOffset: 0, metadata: new Map() };
       this.domainMap.set(domain, info);
       this.domainOrder.push(domain);
       changed = true;
     }
 
+    // Store/update metadata if provided
+    if (msg && info) {
+      const tags = msg?.source?.tags || [];
+      const label = firstString(msg?.observableId, msg?.label, msg?.instanceId, key);
+      info.metadata.set(key, { tags: Array.isArray(tags) ? tags : [], label: label || key });
+    }
+
     if (!info.actions.has(key)) {
       if (!createIfMissing) return info.baseOffset;
-      info.actions.set(key, info.actions.size);
+      // Temporarily assign a placeholder - will be updated by updateStructure
+      info.actions.set(key, this.lanes);
       changed = true;
     }
 
@@ -308,8 +325,8 @@ class LaneLayout {
       info = this.domainMap.get(domain) || info;
     }
 
-    const laneWithin = info.actions.get(key) ?? 0;
-    const laneIndex = (info.baseOffset ?? 0) + laneWithin;
+    // Actions now store absolute lane positions
+    const laneIndex = info.actions.get(key) ?? 0;
     return laneIndex;
   };
 
@@ -318,17 +335,136 @@ class LaneLayout {
     const boundaries: GroupBoundary[] = [];
     const groupIndexByLane: number[] = [];
     let groupIndex = 0;
+    
+    // Helper to extract the most specific grouping tag
+    const getGroupingTag = (tags: string[] | undefined) => {
+      if (!tags || tags.length === 0) return '';
+      // Prefer tags with hyphens (more specific like 'stream-state', 'google-cast')
+      const specificTag = tags.find(t => t.includes('-'));
+      if (specificTag) return specificTag;
+      // Otherwise use the last tag
+      return tags[tags.length - 1] || '';
+    };
+    
+    // Collect all observables from all domains with their metadata
+    const allObservables: Array<{ domain: string; key: string; meta: { tags: string[]; label: string } | undefined }> = [];
     for (const domain of this.domainOrder) {
       const info = this.domainMap.get(domain);
       if (!info) continue;
-      const size = Math.max(1, info.actions.size || 0);
-      info.baseOffset = offset;
-      boundaries.push({ key: domain, start: offset, end: offset + size, size });
-      for (let i = 0; i < size; i++) {
-        groupIndexByLane[offset + i] = groupIndex;
+      
+      for (const [key] of info.actions.entries()) {
+        allObservables.push({
+          domain,
+          key,
+          meta: info.metadata.get(key)
+        });
       }
-      offset += size;
-      groupIndex += 1;
+    }
+    
+    // Sort ALL observables by tag first, then label, then key
+    allObservables.sort((a, b) => {
+      const tagA = getGroupingTag(a.meta?.tags);
+      const tagB = getGroupingTag(b.meta?.tags);
+      
+      // Sort by tag first (primary criterion)
+      if (tagA !== tagB) {
+        return tagA.localeCompare(tagB);
+      }
+      
+      // Then by label
+      const labelA = a.meta?.label || a.key;
+      const labelB = b.meta?.label || b.key;
+      if (labelA !== labelB) {
+        return labelA.localeCompare(labelB);
+      }
+      
+      // Finally by key
+      return a.key.localeCompare(b.key);
+    });
+    
+    // Rebuild domain structure based on sorted order
+    // Clear all actions first and create a mapping from (domain,key) to absolute lane
+    const absoluteLaneMap = new Map<string, number>();
+    
+    for (const domain of this.domainOrder) {
+      const info = this.domainMap.get(domain);
+      if (info) {
+        info.actions.clear();
+        info.baseOffset = 0;
+      }
+    }
+    
+    // Group observables by tag instead of domain
+    let currentTag: string = '';
+    let tagGroupStart = 0;
+    const tagGroups: Array<{ tag: string; observables: typeof allObservables }> = [];
+    
+    for (let i = 0; i < allObservables.length; i++) {
+      const observable = allObservables[i];
+      const tag = getGroupingTag(observable.meta?.tags);
+      
+      if (tag !== currentTag) {
+        if (i > tagGroupStart) {
+          tagGroups.push({
+            tag: currentTag,
+            observables: allObservables.slice(tagGroupStart, i)
+          });
+        }
+        currentTag = tag;
+        tagGroupStart = i;
+      }
+    }
+    // Add the last group
+    if (tagGroupStart < allObservables.length) {
+      tagGroups.push({
+        tag: currentTag,
+        observables: allObservables.slice(tagGroupStart)
+      });
+    }
+    
+    // Assign lanes by tag groups
+    for (const tagGroup of tagGroups) {
+      const groupStartOffset = offset;
+      
+      // Within each tag group, assign absolute lanes to observables
+      for (const observable of tagGroup.observables) {
+        const { domain, key } = observable;
+        
+        // Store the absolute lane position
+        absoluteLaneMap.set(`${domain}::${key}`, offset);
+        offset += 1;
+      }
+      
+      // Create a boundary for this tag group
+      const groupSize = tagGroup.observables.length;
+      if (groupSize > 0) {
+        // Use the tag as the group key, or first observable's label
+        const groupLabel = tagGroup.tag || tagGroup.observables[0]?.meta?.label || 'group';
+        boundaries.push({
+          key: groupLabel,
+          start: groupStartOffset,
+          end: offset,
+          size: groupSize
+        });
+        
+        for (let i = groupStartOffset; i < offset; i++) {
+          groupIndexByLane[i] = groupIndex;
+        }
+        groupIndex += 1;
+      }
+    }
+    
+    // Now rebuild domain actions map to reflect absolute positioning
+    for (const observable of allObservables) {
+      const { domain, key } = observable;
+      const info = this.domainMap.get(domain);
+      if (!info) continue;
+      
+      const absoluteLane = absoluteLaneMap.get(`${domain}::${key}`);
+      if (absoluteLane !== undefined) {
+        // Store absolute lane position directly
+        info.actions.set(key, absoluteLane);
+      }
     }
 
     this.groupBoundaries = boundaries;
@@ -361,8 +497,9 @@ class LaneLayout {
     for (const domain of this.domainOrder) {
       const info = this.domainMap.get(domain);
       if (!info) continue;
-      for (const [key, offset] of info.actions.entries()) {
-        const laneIndex = this.coerceLaneIndex((info.baseOffset ?? 0) + offset);
+      for (const [key, absoluteLane] of info.actions.entries()) {
+        // Actions now store absolute lane positions, not relative offsets
+        const laneIndex = this.coerceLaneIndex(absoluteLane);
         nextMap[laneIndex].add(key);
       }
     }
@@ -743,6 +880,20 @@ export class MarblePanelRuntime {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, this.width, this.height);
 
+    // Draw alternating background colors for each observable group
+    if (this.laneLayout.groupBoundaries.length) {
+      const colors = ['rgba(30, 58, 138, 0.08)', 'rgba(17, 24, 39, 0.08)']; // Subtle blue and dark
+      for (let i = 0; i < this.laneLayout.groupBoundaries.length; i++) {
+        const group = this.laneLayout.groupBoundaries[i];
+        const startY = this.laneY(group.start);
+        const endY = this.laneY(Math.max(group.start, group.end - 1));
+        const height = endY - startY + (this.laneLayout.laneMetrics(this.height).step);
+        
+        ctx.fillStyle = colors[i % 2];
+        ctx.fillRect(0, startY - (this.laneLayout.laneMetrics(this.height).step / 2), this.width, height);
+      }
+    }
+
     ctx.strokeStyle = '#1e2a38';
     ctx.fillStyle = '#9fb6cf';
     ctx.font = '11px ui-sans-serif, system-ui';
@@ -763,49 +914,77 @@ export class MarblePanelRuntime {
     }
     ctx.stroke();
 
-    for (let l = 0; l < this.laneLayout.lanes; l++) {
-      const y = this.laneY(l);
-      ctx.strokeStyle = this.laneActivity.isLaneDisabledForIndex(
-        l,
-        this.laneLayout.laneIndexMap,
-      )
-        ? DISABLED_LANE_STROKE
-        : LANE_STROKE_COLOR;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(this.width, y);
-      ctx.stroke();
-    }
-
-    if (this.laneLayout.groupBoundaries.length > 1) {
-      ctx.strokeStyle = LANE_GROUP_SEPARATOR;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 6]);
-      for (let i = 1; i < this.laneLayout.groupBoundaries.length; i++) {
-        const start = this.laneLayout.groupBoundaries[i].start;
-        const y = (this.laneY(start - 1) + this.laneY(start)) / 2;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(this.width, y);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
-      ctx.lineWidth = 1;
-    }
-
+    // Draw thin dashed lines and labels for each subscription
+    const labelWidth = 200; // Reserve space on the left for labels
+    
     if (this.laneLayout.groupBoundaries.length) {
-      ctx.fillStyle = LANE_GROUP_LABEL_COLOR;
-      ctx.font = LANE_GROUP_LABEL_FONT;
+      ctx.setLineDash([2, 4]);
+      ctx.lineWidth = 0.5;
+      ctx.font = '11px ui-sans-serif, system-ui';
       ctx.textAlign = 'left';
+      
       for (const group of this.laneLayout.groupBoundaries) {
-        const label = this.laneLayout.groupLabels.get(group.key) || group.key;
-        const display = `Observable: ${truncate(label, 26)}`;
-        const startY = this.laneY(group.start);
-        const endY = this.laneY(Math.max(group.start, group.end - 1));
-        let y = (startY + endY) / 2;
-        if (group.size <= 1) y -= 8;
-        ctx.fillText(display, 8, y);
+        // For single-lane groups, use the group label directly
+        if (group.size === 1) {
+          const laneY = this.laneY(group.start);
+          const label = this.laneLayout.groupLabels.get(group.key) || group.key;
+          const isDisabled = this.laneActivity.isLaneDisabledForIndex(group.start, this.laneLayout.laneIndexMap);
+          
+          // Draw dashed line
+          ctx.strokeStyle = isDisabled ? DISABLED_LANE_STROKE : 'rgba(100, 116, 139, 0.3)';
+          ctx.beginPath();
+          ctx.moveTo(labelWidth, laneY);
+          ctx.lineTo(this.width, laneY);
+          ctx.stroke();
+          
+          // Draw label
+          ctx.fillStyle = isDisabled ? '#6b7280' : '#94a3b8';
+          ctx.fillText(truncate(label, 35), 8, laneY - 2);
+        } else {
+          // For multi-lane groups, iterate through each subscription
+          // Get all observables for this group
+          const allObservablesInGroup: Array<{ domain: string; key: string; absoluteLane: number }> = [];
+          
+          for (const domain of this.laneLayout.domainOrder) {
+            const info = this.laneLayout.domainMap.get(domain);
+            if (!info) continue;
+            
+            for (const [key, absoluteLane] of info.actions.entries()) {
+              if (absoluteLane >= group.start && absoluteLane < group.end) {
+                allObservablesInGroup.push({ domain, key, absoluteLane });
+              }
+            }
+          }
+          
+          // Sort by absolute lane
+          allObservablesInGroup.sort((a, b) => a.absoluteLane - b.absoluteLane);
+          
+          // Draw each subscription
+          for (const { key, absoluteLane } of allObservablesInGroup) {
+            const laneY = this.laneY(absoluteLane);
+            const isDisabled = this.laneActivity.isLaneDisabledForIndex(absoluteLane, this.laneLayout.laneIndexMap);
+            
+            // Draw dashed line
+            ctx.strokeStyle = isDisabled ? DISABLED_LANE_STROKE : 'rgba(100, 116, 139, 0.3)';
+            ctx.beginPath();
+            ctx.moveTo(labelWidth, laneY);
+            ctx.lineTo(this.width, laneY);
+            ctx.stroke();
+            
+            // Get the label from metadata
+            const info = this.laneLayout.domainMap.get(this.laneLayout.extractLaneParts(key).domain);
+            const metadata = info?.metadata.get(key);
+            const label = metadata?.label || key.split('/').pop() || key;
+            
+            // Draw label
+            ctx.fillStyle = isDisabled ? '#6b7280' : '#94a3b8';
+            ctx.fillText(truncate(label, 35), 8, laneY - 2);
+          }
+        }
       }
+      
+      // Reset line dash
+      ctx.setLineDash([]);
     }
 
     ctx.fillStyle = '#7aa2d3';
@@ -1102,7 +1281,7 @@ export class MarblePanelRuntime {
     const laneKey = laneSource == null ? type : String(laneSource);
     this.laneLayout.registerGroupLabel(laneKey, msg);
     this.laneActivity.update(laneKey, msg?.rxKind, msg?.subscriptionId);
-    const lane = this.laneLayout.resolveLaneKey(laneKey, this.marbles);
+    const lane = this.laneLayout.resolveLaneKey(laneKey, this.marbles, msg);
 
     let color = hashColor(type);
     if (msg && msg.color != null) {
