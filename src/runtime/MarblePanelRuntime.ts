@@ -23,6 +23,10 @@ const LANE_GROUP_GAP = 0.7;
 const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
 const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
 const LANE_GROUP_SEPARATOR = '#2a3b52';
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 20;
+const ZOOM_IN_FACTOR = 1.1;
+const ZOOM_OUT_FACTOR = 0.9;
 
 type RefObject<T> = { current: T | null };
 
@@ -75,6 +79,329 @@ type GroupBoundary = {
   size: number;
 };
 
+class FilterRegistry {
+  filterText: string;
+  filterDomain: string;
+  filterDomains: Map<string, string>;
+  notifyFilterOptions: ((options: FilterOptions) => void) | null;
+
+  constructor(
+    initialText: string,
+    initialDomain: string,
+    notifyFilterOptions?: (options: FilterOptions) => void,
+  ) {
+    this.filterText = (initialText || '').trim().toLowerCase();
+    this.filterDomain = (initialDomain || '').toLowerCase();
+    this.filterDomains = new Map();
+    this.notifyFilterOptions = notifyFilterOptions || null;
+  }
+
+  setText = (value: string) => {
+    this.filterText = (value || '').trim().toLowerCase();
+  };
+
+  setDomain = (value: string) => {
+    this.filterDomain = (value || '').toLowerCase();
+  };
+
+  matches = (label: string, tags: FilterTags | null) => {
+    const matchesText = !this.filterText || label.toLowerCase().includes(this.filterText);
+    const matchesDomain =
+      !this.filterDomain || (tags?.domainKey && tags.domainKey === this.filterDomain);
+    return matchesText && matchesDomain;
+  };
+
+  ingest = (tags: FilterTags | null) => {
+    if (!tags) return;
+    let changed = false;
+
+    if (tags.domainKey) {
+      const label = tags.domainLabel || tags.domainKey;
+      if (!this.filterDomains.has(tags.domainKey)) {
+        this.filterDomains.set(tags.domainKey, label);
+        changed = true;
+      }
+    }
+
+    if (changed && this.notifyFilterOptions) {
+      const domains = Array.from(this.filterDomains.entries()).map(([value, label]) => ({
+        value,
+        label: label || value,
+      }));
+
+      domains.sort((a, b) => a.label.localeCompare(b.label));
+
+      this.notifyFilterOptions({ domains });
+    }
+  };
+
+  clear = () => {
+    this.filterDomains.clear();
+    if (this.notifyFilterOptions) {
+      this.notifyFilterOptions({ domains: [] });
+    }
+  };
+}
+
+class LaneActivity {
+  laneStatus: Map<string, LaneStatus> = new Map();
+  subscriptionState: Map<string, SubscriptionState> = new Map();
+
+  update = (laneKey: string, kind?: string, subscriptionId?: string) => {
+    if (!laneKey) return;
+    const rxKind = normalizeRxKind(kind);
+    if (!rxKind) return;
+    const subscriptionKey = subscriptionId ? `${laneKey}::${subscriptionId}` : null;
+
+    if (rxKind === 'subscribe' || rxKind === 'create') {
+      const state = this.laneStatus.get(laneKey) || { activeCount: 0, disabled: false };
+      if (subscriptionKey) {
+        const existing = this.subscriptionState.get(subscriptionKey);
+        if (!existing || !existing.active) {
+          this.subscriptionState.set(subscriptionKey, { laneKey, active: true });
+          state.activeCount += 1;
+        }
+      } else {
+        state.activeCount += 1;
+      }
+      state.disabled = false;
+      this.laneStatus.set(laneKey, state);
+      return;
+    }
+
+    const isTerminal = rxKind === 'complete' || rxKind === 'error' || rxKind === 'unsubscribe';
+    if (!isTerminal) return;
+
+    const sub = subscriptionKey ? this.subscriptionState.get(subscriptionKey) : null;
+    const targetLaneKey = sub?.laneKey || laneKey;
+    const state = this.laneStatus.get(targetLaneKey) || { activeCount: 0, disabled: false };
+
+    if (subscriptionKey && sub) {
+      if (sub.active) {
+        state.activeCount = Math.max(0, state.activeCount - 1);
+      }
+      this.subscriptionState.delete(subscriptionKey);
+    } else if (!subscriptionKey || rxKind !== 'unsubscribe') {
+      state.activeCount = Math.max(0, state.activeCount - 1);
+    }
+
+    if (state.activeCount === 0) {
+      state.disabled = true;
+    }
+
+    this.laneStatus.set(targetLaneKey, state);
+  };
+
+  isLaneDisabled = (laneKey: string) => {
+    if (!laneKey) return false;
+    const state = this.laneStatus.get(laneKey);
+    return Boolean(state && state.disabled && state.activeCount <= 0);
+  };
+
+  isLaneDisabledForIndex = (laneIndex: number, laneIndexMap: Array<Set<string>>) => {
+    const entries = laneIndexMap[laneIndex];
+    if (!entries || entries.size === 0) return false;
+    let hasState = false;
+    for (const key of entries) {
+      const state = this.laneStatus.get(key);
+      if (!state) continue;
+      hasState = true;
+      if (state.activeCount > 0) return false;
+      if (!state.disabled) return false;
+    }
+    return hasState;
+  };
+
+  clear = () => {
+    this.laneStatus.clear();
+    this.subscriptionState.clear();
+  };
+}
+
+class LaneLayout {
+  lanes: number;
+  maxAutoLanes: number;
+  syncLaneCount?: (lanes: number) => void;
+
+  domainOrder: string[];
+  domainMap: Map<string, DomainInfo>;
+  laneIndexMap: Array<Set<string>>;
+  groupBoundaries: GroupBoundary[];
+  groupIndexByLane: number[];
+  groupLabels: Map<string, string>;
+
+  constructor(initialLanes: number, maxAutoLanes: number, syncLaneCount?: (lanes: number) => void) {
+    this.lanes = initialLanes;
+    this.maxAutoLanes = Math.max(1, maxAutoLanes);
+    this.syncLaneCount = syncLaneCount;
+
+    this.domainOrder = [];
+    this.domainMap = new Map();
+    this.laneIndexMap = [];
+    this.groupBoundaries = [];
+    this.groupIndexByLane = [];
+    this.groupLabels = new Map();
+  }
+
+  setLanes = (value: number) => {
+    const clamped = Math.max(1, Math.min(this.maxAutoLanes, value));
+    this.lanes = clamped;
+    if (this.syncLaneCount && clamped !== value) {
+      this.syncLaneCount(clamped);
+    }
+    this.rebuildLaneIndexMap();
+  };
+
+  coerceLaneIndex = (index: number) => {
+    if (!Number.isFinite(index) || index < 0) return 0;
+    if (this.lanes <= 0) return 0;
+    if (index < this.lanes) return index;
+    return index % this.lanes;
+  };
+
+  extractLaneParts = (rawKey: string) => {
+    const key = rawKey ? String(rawKey) : 'default';
+    const slashIdx = key.indexOf('/');
+    const domain = slashIdx > 0 ? key.slice(0, slashIdx) : key;
+    const normalizedDomain = domain || 'default';
+    return { key, domain: normalizedDomain };
+  };
+
+  registerGroupLabel = (laneKey: string, msg: any) => {
+    const { domain } = this.extractLaneParts(laneKey);
+    if (!domain) return;
+    const existing = this.groupLabels.get(domain);
+    if (existing && existing !== domain) return;
+    const label = firstString(msg?.observableId, msg?.label, msg?.instanceId, domain);
+    if (label) {
+      this.groupLabels.set(domain, label);
+    }
+  };
+
+  resolveLaneKey = (rawKey: string, marbles: Marble[]) => {
+    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true, marbles));
+  };
+
+  getLaneIndexForKey = (rawKey: string, createIfMissing: boolean, marbles: Marble[] = []) => {
+    const { key, domain } = this.extractLaneParts(rawKey);
+    let info = this.domainMap.get(domain);
+    let changed = false;
+
+    if (!info) {
+      if (!createIfMissing) return 0;
+      info = { actions: new Map(), baseOffset: 0 };
+      this.domainMap.set(domain, info);
+      this.domainOrder.push(domain);
+      changed = true;
+    }
+
+    if (!info.actions.has(key)) {
+      if (!createIfMissing) return info.baseOffset;
+      info.actions.set(key, info.actions.size);
+      changed = true;
+    }
+
+    if (changed && createIfMissing) {
+      this.updateStructure(true, marbles);
+      info = this.domainMap.get(domain) || info;
+    }
+
+    const laneWithin = info.actions.get(key) ?? 0;
+    const laneIndex = (info.baseOffset ?? 0) + laneWithin;
+    return laneIndex;
+  };
+
+  updateStructure = (reassign: boolean, marbles: Marble[]) => {
+    let offset = 0;
+    const boundaries: GroupBoundary[] = [];
+    const groupIndexByLane: number[] = [];
+    let groupIndex = 0;
+    for (const domain of this.domainOrder) {
+      const info = this.domainMap.get(domain);
+      if (!info) continue;
+      const size = Math.max(1, info.actions.size || 0);
+      info.baseOffset = offset;
+      boundaries.push({ key: domain, start: offset, end: offset + size, size });
+      for (let i = 0; i < size; i++) {
+        groupIndexByLane[offset + i] = groupIndex;
+      }
+      offset += size;
+      groupIndex += 1;
+    }
+
+    this.groupBoundaries = boundaries;
+    this.groupIndexByLane = groupIndexByLane;
+
+    const prevLanes = this.lanes;
+    const totalLanes = offset > 0 ? offset : prevLanes || 1;
+    const clamped = Math.max(1, Math.min(this.maxAutoLanes, totalLanes));
+    this.lanes = clamped;
+    if (this.syncLaneCount && clamped !== prevLanes) {
+      this.syncLaneCount(clamped);
+    }
+
+    if (reassign) {
+      this.reassignMarbleLanes(marbles);
+    }
+    this.rebuildLaneIndexMap();
+  };
+
+  rebuildLaneIndexMap = () => {
+    const laneCount = Math.max(1, this.lanes);
+    const nextMap = Array.from({ length: laneCount }, () => new Set<string>());
+
+    for (const domain of this.domainOrder) {
+      const info = this.domainMap.get(domain);
+      if (!info) continue;
+      for (const [key, offset] of info.actions.entries()) {
+        const laneIndex = this.coerceLaneIndex((info.baseOffset ?? 0) + offset);
+        nextMap[laneIndex].add(key);
+      }
+    }
+
+    this.laneIndexMap = nextMap;
+  };
+
+  reassignMarbleLanes = (marbles: Marble[]) => {
+    if (!marbles.length) return;
+    for (const marble of marbles) {
+      const laneKey =
+        marble.laneKey ??
+        marble.msg?.laneKey ??
+        marble.msg?.observableId ??
+        marble.msg?.label ??
+        marble.msg?.type;
+      const laneIndex = this.getLaneIndexForKey(laneKey, false);
+      marble.lane = this.coerceLaneIndex(laneIndex);
+    }
+  };
+
+  laneMetrics = (height: number) => {
+    const pad = LANE_PAD;
+    const inner = Math.max(1, height - pad * 2);
+    const groupCount = Math.max(1, this.groupBoundaries.length || 1);
+    const virtualLanes = this.lanes + Math.max(0, groupCount - 1) * LANE_GROUP_GAP;
+    const step = inner / Math.max(1, virtualLanes);
+    return { pad, step };
+  };
+
+  laneY = (lane: number, height: number) => {
+    const { pad, step } = this.laneMetrics(height);
+    const groupIndex = this.groupIndexByLane[lane] ?? 0;
+    const virtualIndex = lane + groupIndex * LANE_GROUP_GAP;
+    return pad + (virtualIndex + 0.5) * step;
+  };
+
+  clear = () => {
+    this.domainOrder.length = 0;
+    this.domainMap.clear();
+    this.laneIndexMap = [];
+    this.groupBoundaries = [];
+    this.groupIndexByLane = [];
+    this.groupLabels.clear();
+  };
+}
+
 export class MarblePanelRuntime {
   canvas: HTMLCanvasElement | null;
   stageWrap: HTMLDivElement | null;
@@ -82,7 +409,6 @@ export class MarblePanelRuntime {
   setTooltipState: (state: TooltipState) => void;
   setPinnedId: (id: number | null) => void;
   notifyRunningChange: (running: boolean) => void;
-  syncLaneCount?: (lanes: number) => void;
 
   ctx: CanvasRenderingContext2D | null;
   width: number;
@@ -90,34 +416,25 @@ export class MarblePanelRuntime {
   DPR: number;
 
   running: boolean;
-  lanes: number;
-  filterText: string;
-  filterDomain: string;
-  filterDomains: Map<string, string>;
-  notifyFilterOptions: ((options: FilterOptions) => void) | null;
-  yZoom: number;
+  xZoom: number;
   worldOffsetPx: number;
+  worldOffsetPy: number;
   timeOriginMs: number;
-  maxAutoLanes: number;
+
+  filters: FilterRegistry;
+  laneLayout: LaneLayout;
+  laneActivity: LaneActivity;
 
   marbles: Marble[];
   nextId: number;
   totalEvents: number;
-  domainOrder: string[];
-  domainMap: Map<string, DomainInfo>;
-  laneStatus: Map<string, LaneStatus>;
-  subscriptionState: Map<string, SubscriptionState>;
-  laneIndexMap: Array<Set<string>>;
-  groupBoundaries: GroupBoundary[];
-  groupIndexByLane: number[];
-  groupLabels: Map<string, string>;
 
   hoverId: number | null;
   pinnedId: number | null;
   lastTooltipPayload: TooltipState | null;
 
   mouse: { x: number; y: number; down: boolean };
-  dragStart: { x: number; offset: number } | null;
+  dragStart: { x: number; y: number; offsetX: number; offsetY: number } | null;
 
   connecting: boolean;
   port: any;
@@ -127,7 +444,103 @@ export class MarblePanelRuntime {
   animationFrame: number | null;
   resizeObserver: ResizeObserver | null;
 
-  handlePortMessage: (msg: any) => void;
+  handlePortMessage = (msg: any) => {
+    this.renderMessage(msg);
+  };
+
+  handleMouseMove = (e: MouseEvent) => {
+    if (!this.canvas) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = e.clientX - rect.left;
+    this.mouse.y = e.clientY - rect.top;
+  };
+
+  handleMouseDown = () => {
+    this.mouse.down = true;
+    this.dragStart = {
+      x: this.mouse.x,
+      y: this.mouse.y,
+      offsetX: this.worldOffsetPx,
+      offsetY: this.worldOffsetPy,
+    };
+  };
+
+  handleMouseUp = () => {
+    this.mouse.down = false;
+    this.dragStart = null;
+  };
+
+  handleWheel = (e: WheelEvent) => {
+    if (e.shiftKey) return;
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    const factor = delta > 0 ? ZOOM_OUT_FACTOR : ZOOM_IN_FACTOR;
+    this.zoomByFactor(factor);
+  };
+
+  handleCanvasClick = () => {
+    if (this.hoverId) {
+      this.setPinned(this.hoverId);
+    } else {
+      this.setPinned(null);
+      this.publishTooltip(null);
+    }
+  };
+
+  handleKeyDown = (e: KeyboardEvent) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      this.toggleRunningFromRuntime();
+    }
+  };
+
+  handleUnload = () => {
+    try {
+      this.port?.disconnect();
+    } catch {}
+  };
+
+  setZoom = (next: number) => {
+    this.xZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+  };
+
+  zoomByFactor = (factor: number) => {
+    this.setZoom(this.xZoom * factor);
+  };
+
+  zoomIn = () => {
+    this.zoomByFactor(ZOOM_IN_FACTOR);
+  };
+
+  zoomOut = () => {
+    this.zoomByFactor(ZOOM_OUT_FACTOR);
+  };
+
+  frame = () => {
+    if (this.running) {
+      this.timeOriginMs = Date.now();
+    }
+
+    this.layout();
+    this.drawGrid();
+    this.drawMarbles();
+    this.updateTooltipState();
+
+    this.animationFrame = requestAnimationFrame(this.frame);
+  };
+
+  handlePortDisconnect = () => {
+    this.pushMarble({ type: 'INFO', text: 'Port disconnected. Reconnecting…' });
+    this.connecting = false;
+    this.reconnectTimer = window.setTimeout(() => this.connect(), 500);
+  };
+
+  handleNavigated = () => {
+    try {
+      this.port?.postMessage({ type: 'INIT', tabId: chrome.devtools.inspectedWindow.tabId });
+      this.pushMarble({ type: 'NAVIGATED' });
+    } catch {}
+  };
 
   constructor({
     canvasRef,
@@ -150,7 +563,6 @@ export class MarblePanelRuntime {
     this.setTooltipState = setTooltipState;
     this.setPinnedId = setPinnedId;
     this.notifyRunningChange = notifyRunningChange;
-    this.syncLaneCount = syncLaneCount;
 
     this.ctx = null;
     this.width = 0;
@@ -158,27 +570,18 @@ export class MarblePanelRuntime {
     this.DPR = window.devicePixelRatio || 1;
 
     this.running = initialRunning;
-    this.lanes = initialLanes;
-    this.filterText = (initialFilter || '').trim().toLowerCase();
-    this.filterDomain = (initialDomainFilter || '').toLowerCase();
-    this.filterDomains = new Map();
-    this.notifyFilterOptions = setFilterOptions || null;
-    this.yZoom = 1;
+    this.xZoom = 1;
     this.worldOffsetPx = 0;
+    this.worldOffsetPy = 0;
     this.timeOriginMs = Date.now();
-    this.maxAutoLanes = Math.max(1, maxAutoLanes);
+
+    this.filters = new FilterRegistry(initialFilter, initialDomainFilter, setFilterOptions);
+    this.laneLayout = new LaneLayout(initialLanes, maxAutoLanes, syncLaneCount);
+    this.laneActivity = new LaneActivity();
 
     this.marbles = [];
     this.nextId = 1;
     this.totalEvents = 0;
-    this.domainOrder = [];
-    this.domainMap = new Map();
-    this.laneStatus = new Map();
-    this.subscriptionState = new Map();
-    this.laneIndexMap = [];
-    this.groupBoundaries = [];
-    this.groupIndexByLane = [];
-    this.groupLabels = new Map();
 
     this.hoverId = null;
     this.pinnedId = null;
@@ -194,19 +597,6 @@ export class MarblePanelRuntime {
 
     this.animationFrame = null;
     this.resizeObserver = null;
-
-    this.handleMouseMove = this.handleMouseMove.bind(this);
-    this.handleMouseDown = this.handleMouseDown.bind(this);
-    this.handleMouseUp = this.handleMouseUp.bind(this);
-    this.handleWheel = this.handleWheel.bind(this);
-    this.handleCanvasClick = this.handleCanvasClick.bind(this);
-    this.handleKeyDown = this.handleKeyDown.bind(this);
-    this.handleUnload = this.handleUnload.bind(this);
-    this.frame = this.frame.bind(this);
-
-    this.handlePortMessage = this.renderMessage.bind(this);
-    this.handlePortDisconnect = this.handlePortDisconnect.bind(this);
-    this.handleNavigated = this.handleNavigated.bind(this);
 
     this.init();
   }
@@ -274,53 +664,6 @@ export class MarblePanelRuntime {
     }
   }
 
-  handleMouseMove(e: MouseEvent) {
-    if (!this.canvas) return;
-    const rect = this.canvas.getBoundingClientRect();
-    this.mouse.x = e.clientX - rect.left;
-    this.mouse.y = e.clientY - rect.top;
-  }
-
-  handleMouseDown() {
-    this.mouse.down = true;
-    this.dragStart = { x: this.mouse.x, offset: this.worldOffsetPx };
-  }
-
-  handleMouseUp() {
-    this.mouse.down = false;
-    this.dragStart = null;
-  }
-
-  handleWheel(e: WheelEvent) {
-    if (e.ctrlKey || e.shiftKey) return;
-    e.preventDefault();
-    const delta = Math.sign(e.deltaY);
-    const factor = delta > 0 ? 0.9 : 1.1;
-    this.yZoom = Math.max(0.5, Math.min(2.5, this.yZoom * factor));
-  }
-
-  handleCanvasClick() {
-    if (this.hoverId) {
-      this.setPinned(this.hoverId);
-    } else {
-      this.setPinned(null);
-      this.publishTooltip(null);
-    }
-  }
-
-  handleKeyDown(e: KeyboardEvent) {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      this.toggleRunningFromRuntime();
-    }
-  }
-
-  handleUnload() {
-    try {
-      this.port?.disconnect();
-    } catch {}
-  }
-
   layout() {
     this.fitCanvas();
   }
@@ -346,119 +689,18 @@ export class MarblePanelRuntime {
     }
   }
 
-  rebuildLaneIndexMap() {
-    const laneCount = Math.max(1, this.lanes);
-    const nextMap = Array.from({ length: laneCount }, () => new Set<string>());
-
-    for (const domain of this.domainOrder) {
-      const info = this.domainMap.get(domain);
-      if (!info) continue;
-      for (const [key, offset] of info.actions.entries()) {
-        const laneIndex = this.coerceLaneIndex((info.baseOffset ?? 0) + offset);
-        nextMap[laneIndex].add(key);
-      }
-    }
-
-    this.laneIndexMap = nextMap;
-  }
-
-  updateLaneState(laneKey: string, kind?: string, subscriptionId?: string) {
-    if (!laneKey) return;
-    const rxKind = normalizeRxKind(kind);
-    if (!rxKind) return;
-    const subscriptionKey = subscriptionId ? `${laneKey}::${subscriptionId}` : null;
-
-    if (rxKind === 'subscribe' || rxKind === 'create') {
-      const state = this.laneStatus.get(laneKey) || { activeCount: 0, disabled: false };
-      if (subscriptionKey) {
-        const existing = this.subscriptionState.get(subscriptionKey);
-        if (!existing || !existing.active) {
-          this.subscriptionState.set(subscriptionKey, { laneKey, active: true });
-          state.activeCount += 1;
-        }
-      } else {
-        state.activeCount += 1;
-      }
-      state.disabled = false;
-      this.laneStatus.set(laneKey, state);
-      return;
-    }
-
-    const isTerminal = rxKind === 'complete' || rxKind === 'error' || rxKind === 'unsubscribe';
-    if (!isTerminal) return;
-
-    const sub = subscriptionKey ? this.subscriptionState.get(subscriptionKey) : null;
-    const targetLaneKey = sub?.laneKey || laneKey;
-    const state = this.laneStatus.get(targetLaneKey) || { activeCount: 0, disabled: false };
-
-    if (subscriptionKey && sub) {
-      if (sub.active) {
-        state.activeCount = Math.max(0, state.activeCount - 1);
-      }
-      this.subscriptionState.delete(subscriptionKey);
-    } else if (!subscriptionKey || rxKind !== 'unsubscribe') {
-      state.activeCount = Math.max(0, state.activeCount - 1);
-    }
-
-    if (state.activeCount === 0) {
-      state.disabled = true;
-    }
-
-    this.laneStatus.set(targetLaneKey, state);
-  }
-
-  isLaneDisabledForKey(laneKey: string) {
-    if (!laneKey) return false;
-    const state = this.laneStatus.get(laneKey);
-    return Boolean(state && state.disabled && state.activeCount <= 0);
-  }
-
-  isLaneDisabledForIndex(laneIndex: number) {
-    const entries = this.laneIndexMap[laneIndex];
-    if (!entries || entries.size === 0) return false;
-    let hasState = false;
-    for (const key of entries) {
-      const state = this.laneStatus.get(key);
-      if (!state) continue;
-      hasState = true;
-      if (state.activeCount > 0) return false;
-      if (!state.disabled) return false;
-    }
-    return hasState;
-  }
-
-  laneMetrics() {
-    const pad = LANE_PAD;
-    const inner = Math.max(1, this.height - pad * 2);
-    const groupCount = Math.max(1, this.groupBoundaries.length || 1);
-    const virtualLanes = this.lanes + Math.max(0, groupCount - 1) * LANE_GROUP_GAP;
-    const step = inner / Math.max(1, virtualLanes);
-    return { pad, step };
-  }
+  applyYTransform = (y: number) => {
+    return y + this.worldOffsetPy;
+  };
 
   laneY(lane: number) {
-    const { pad, step } = this.laneMetrics();
-    const groupIndex = this.groupIndexByLane[lane] ?? 0;
-    const virtualIndex = lane + groupIndex * LANE_GROUP_GAP;
-    return pad + (virtualIndex + 0.5) * step;
+    const baseY = this.laneLayout.laneY(lane, this.height);
+    return this.applyYTransform(baseY);
   }
 
   xForTime(ms: number) {
     const dtSec = (this.timeOriginMs - ms) / 1000;
-    return this.width - NOW_MARKER_OFFSET - dtSec * PX_PER_SEC + this.worldOffsetPx;
-  }
-
-  frame() {
-    if (this.running) {
-      this.timeOriginMs = Date.now();
-    }
-
-    this.layout();
-    this.drawGrid();
-    this.drawMarbles();
-    this.updateTooltipState();
-
-    this.animationFrame = requestAnimationFrame(this.frame);
+    return this.width - NOW_MARKER_OFFSET - dtSec * PX_PER_SEC * this.xZoom + this.worldOffsetPx;
   }
 
   drawGrid() {
@@ -492,21 +734,26 @@ export class MarblePanelRuntime {
     }
     ctx.stroke();
 
-    for (let l = 0; l < this.lanes; l++) {
+    for (let l = 0; l < this.laneLayout.lanes; l++) {
       const y = this.laneY(l);
-      ctx.strokeStyle = this.isLaneDisabledForIndex(l) ? DISABLED_LANE_STROKE : LANE_STROKE_COLOR;
+      ctx.strokeStyle = this.laneActivity.isLaneDisabledForIndex(
+        l,
+        this.laneLayout.laneIndexMap,
+      )
+        ? DISABLED_LANE_STROKE
+        : LANE_STROKE_COLOR;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
       ctx.stroke();
     }
 
-    if (this.groupBoundaries.length > 1) {
+    if (this.laneLayout.groupBoundaries.length > 1) {
       ctx.strokeStyle = LANE_GROUP_SEPARATOR;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 6]);
-      for (let i = 1; i < this.groupBoundaries.length; i++) {
-        const start = this.groupBoundaries[i].start;
+      for (let i = 1; i < this.laneLayout.groupBoundaries.length; i++) {
+        const start = this.laneLayout.groupBoundaries[i].start;
         const y = (this.laneY(start - 1) + this.laneY(start)) / 2;
         ctx.beginPath();
         ctx.moveTo(0, y);
@@ -517,12 +764,12 @@ export class MarblePanelRuntime {
       ctx.lineWidth = 1;
     }
 
-    if (this.groupBoundaries.length) {
+    if (this.laneLayout.groupBoundaries.length) {
       ctx.fillStyle = LANE_GROUP_LABEL_COLOR;
       ctx.font = LANE_GROUP_LABEL_FONT;
       ctx.textAlign = 'left';
-      for (const group of this.groupBoundaries) {
-        const label = this.groupLabels.get(group.key) || group.key;
+      for (const group of this.laneLayout.groupBoundaries) {
+        const label = this.laneLayout.groupLabels.get(group.key) || group.key;
         const display = `Observable: ${truncate(label, 26)}`;
         const startY = this.laneY(group.start);
         const endY = this.laneY(Math.max(group.start, group.end - 1));
@@ -547,11 +794,10 @@ export class MarblePanelRuntime {
 
     if (this.mouse.down && this.dragStart) {
       const dx = this.mouse.x - this.dragStart.x;
-      this.worldOffsetPx = this.dragStart.offset + dx;
+      const dy = this.mouse.y - this.dragStart.y;
+      this.worldOffsetPx = this.dragStart.offsetX + dx;
+      this.worldOffsetPy = this.dragStart.offsetY + dy;
     }
-
-    const filterText = this.filterText;
-    const filterDomain = this.filterDomain;
 
     for (let i = this.marbles.length - 1; i >= 0; i--) {
       const marble = this.marbles[i];
@@ -559,17 +805,13 @@ export class MarblePanelRuntime {
       if (x < -40 || x > this.width + 40) continue;
 
       const label = (marble.msg?.type || '').toString();
-      const tags = marble.filters || {};
+      const tags = marble.filters || null;
 
-      const matchesText = !filterText || label.toLowerCase().includes(filterText);
-      const matchesDomain = !filterDomain || (tags.domainKey && tags.domainKey === filterDomain);
+      if (!this.filters.matches(label, tags)) continue;
 
-      if (!(matchesText && matchesDomain)) continue;
+      const y = this.laneY(marble.lane);
 
-      const baseY = this.laneY(marble.lane);
-      const y = baseY * this.yZoom + (1 - this.yZoom) * this.height * 0.5;
-
-      const laneDisabled = this.isLaneDisabledForKey(marble.laneKey);
+      const laneDisabled = this.laneActivity.isLaneDisabled(marble.laneKey);
       const color = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
       drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
 
@@ -594,8 +836,7 @@ export class MarblePanelRuntime {
       return;
     }
 
-    const baseY = this.laneY(marble.lane);
-    const y = baseY * this.yZoom + (1 - this.yZoom) * this.height * 0.5;
+    const y = this.laneY(marble.lane);
     const x = this.xForTime(marble.timeMs);
 
     this.publishTooltip({
@@ -655,152 +896,15 @@ export class MarblePanelRuntime {
   }
 
   setLanes(value: number) {
-    const clamped = Math.max(1, Math.min(this.maxAutoLanes, value));
-    this.lanes = clamped;
-    if (this.syncLaneCount && clamped !== value) {
-      this.syncLaneCount(clamped);
-    }
-    this.rebuildLaneIndexMap();
+    this.laneLayout.setLanes(value);
   }
 
   setFilterText(value: string) {
-    this.filterText = (value || '').trim().toLowerCase();
+    this.filters.setText(value);
   }
 
   setFilterDomain(value: string) {
-    this.filterDomain = (value || '').toLowerCase();
-  }
-
-  ingestFilterTags(tags: FilterTags | null) {
-    if (!tags) return;
-    let changed = false;
-
-    if (tags.domainKey) {
-      const label = tags.domainLabel || tags.domainKey;
-      if (!this.filterDomains.has(tags.domainKey)) {
-        this.filterDomains.set(tags.domainKey, label);
-        changed = true;
-      }
-    }
-
-    if (changed && this.notifyFilterOptions) {
-      const domains = Array.from(this.filterDomains.entries()).map(([value, label]) => ({
-        value,
-        label: label || value,
-      }));
-
-      domains.sort((a, b) => a.label.localeCompare(b.label));
-
-      this.notifyFilterOptions({ domains });
-    }
-  }
-
-  resolveLaneKey(rawKey: string) {
-    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true));
-  }
-
-  coerceLaneIndex(index: number) {
-    if (!Number.isFinite(index) || index < 0) return 0;
-    if (this.lanes <= 0) return 0;
-    if (index < this.lanes) return index;
-    return index % this.lanes;
-  }
-
-  extractLaneParts(rawKey: string) {
-    const key = rawKey ? String(rawKey) : 'default';
-    const slashIdx = key.indexOf('/');
-    const domain = slashIdx > 0 ? key.slice(0, slashIdx) : key;
-    const normalizedDomain = domain || 'default';
-    return { key, domain: normalizedDomain };
-  }
-
-  registerGroupLabel(laneKey: string, msg: any) {
-    const { domain } = this.extractLaneParts(laneKey);
-    if (!domain) return;
-    const existing = this.groupLabels.get(domain);
-    if (existing && existing !== domain) return;
-    const label = firstString(msg?.observableId, msg?.label, msg?.instanceId, domain);
-    if (label) {
-      this.groupLabels.set(domain, label);
-    }
-  }
-
-  getLaneIndexForKey(rawKey: string, createIfMissing: boolean) {
-    const { key, domain } = this.extractLaneParts(rawKey);
-    let info = this.domainMap.get(domain);
-    let changed = false;
-
-    if (!info) {
-      if (!createIfMissing) return 0;
-      info = { actions: new Map(), baseOffset: 0 };
-      this.domainMap.set(domain, info);
-      this.domainOrder.push(domain);
-      changed = true;
-    }
-
-    if (!info.actions.has(key)) {
-      if (!createIfMissing) return info.baseOffset;
-      info.actions.set(key, info.actions.size);
-      changed = true;
-    }
-
-    if (changed && createIfMissing) {
-      this.updateLaneStructure(true);
-      info = this.domainMap.get(domain) || info;
-    }
-
-    const laneWithin = info.actions.get(key) ?? 0;
-    const laneIndex = (info.baseOffset ?? 0) + laneWithin;
-    return laneIndex;
-  }
-
-  updateLaneStructure(reassign: boolean) {
-    let offset = 0;
-    const boundaries: GroupBoundary[] = [];
-    const groupIndexByLane: number[] = [];
-    let groupIndex = 0;
-    for (const domain of this.domainOrder) {
-      const info = this.domainMap.get(domain);
-      if (!info) continue;
-      const size = Math.max(1, info.actions.size || 0);
-      info.baseOffset = offset;
-      boundaries.push({ key: domain, start: offset, end: offset + size, size });
-      for (let i = 0; i < size; i++) {
-        groupIndexByLane[offset + i] = groupIndex;
-      }
-      offset += size;
-      groupIndex += 1;
-    }
-
-    this.groupBoundaries = boundaries;
-    this.groupIndexByLane = groupIndexByLane;
-
-    const prevLanes = this.lanes;
-    const totalLanes = offset > 0 ? offset : prevLanes || 1;
-    const clamped = Math.max(1, Math.min(this.maxAutoLanes, totalLanes));
-    this.lanes = clamped;
-    if (this.syncLaneCount && clamped !== prevLanes) {
-      this.syncLaneCount(clamped);
-    }
-
-    if (reassign) {
-      this.reassignMarbleLanes();
-    }
-    this.rebuildLaneIndexMap();
-  }
-
-  reassignMarbleLanes() {
-    if (!this.marbles.length) return;
-    for (const marble of this.marbles) {
-      const laneKey =
-        marble.laneKey ??
-        marble.msg?.laneKey ??
-        marble.msg?.observableId ??
-        marble.msg?.label ??
-        marble.msg?.type;
-      const laneIndex = this.getLaneIndexForKey(laneKey, false);
-      marble.lane = this.coerceLaneIndex(laneIndex);
-    }
+    this.filters.setDomain(value);
   }
 
   clear() {
@@ -810,19 +914,10 @@ export class MarblePanelRuntime {
     this.setPinned(null);
     this.hoverId = null;
     this.publishTooltip(null);
-    this.domainOrder.length = 0;
-    this.domainMap.clear();
-    this.laneStatus.clear();
-    this.subscriptionState.clear();
-    this.laneIndexMap = [];
-    this.groupBoundaries = [];
-    this.groupIndexByLane = [];
-    this.groupLabels.clear();
-    this.filterDomains.clear();
-    if (this.notifyFilterOptions) {
-      this.notifyFilterOptions({ domains: [] });
-    }
-    this.updateLaneStructure(false);
+    this.laneLayout.clear();
+    this.laneActivity.clear();
+    this.filters.clear();
+    this.laneLayout.updateStructure(false, this.marbles);
   }
 
   publishStats() {
@@ -891,19 +986,6 @@ export class MarblePanelRuntime {
     if (normalized) {
       this.pushMarble(normalized);
     }
-  }
-
-  handlePortDisconnect() {
-    this.pushMarble({ type: 'INFO', text: 'Port disconnected. Reconnecting…' });
-    this.connecting = false;
-    this.reconnectTimer = window.setTimeout(() => this.connect(), 500);
-  }
-
-  handleNavigated() {
-    try {
-      this.port?.postMessage({ type: 'INIT', tabId: chrome.devtools.inspectedWindow.tabId });
-      this.pushMarble({ type: 'NAVIGATED' });
-    } catch {}
   }
 
   connect() {
@@ -975,9 +1057,9 @@ export class MarblePanelRuntime {
     const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
     const laneSource = msg?.laneKey ?? msg?.label ?? type;
     const laneKey = laneSource == null ? type : String(laneSource);
-    this.registerGroupLabel(laneKey, msg);
-    this.updateLaneState(laneKey, msg?.rxKind, msg?.subscriptionId);
-    const lane = this.resolveLaneKey(laneKey);
+    this.laneLayout.registerGroupLabel(laneKey, msg);
+    this.laneActivity.update(laneKey, msg?.rxKind, msg?.subscriptionId);
+    const lane = this.laneLayout.resolveLaneKey(laneKey, this.marbles);
 
     let color = hashColor(type);
     if (msg && msg.color != null) {
@@ -1002,7 +1084,7 @@ export class MarblePanelRuntime {
       filters,
     };
     this.marbles.push(marble);
-    this.ingestFilterTags(filters);
+    this.filters.ingest(filters);
     this.totalEvents++;
     this.publishStats();
   }

@@ -96,6 +96,14 @@ export function PanelApp() {
     setFilterDomain('');
   };
 
+  const handleZoomIn = () => {
+    runtimeRef.current?.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    runtimeRef.current?.zoomOut();
+  };
+
   const handleCopy = async () => {
     if (!tooltipState.message) return;
     try {
@@ -160,6 +168,8 @@ export function PanelApp() {
         onClear={handleClear}
         onLanesChange={setLanes}
         onFilterTextChange={setFilterText}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
       />
       <FilterBar
         domains={filterOptions.domains}

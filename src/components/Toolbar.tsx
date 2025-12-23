@@ -2,6 +2,7 @@ import React from '../react';
 import {
   TOOLBAR_STYLE,
   BASE_BTN_STYLE,
+  SMALL_BTN_STYLE,
   TITLE_STYLE,
   LANES_LABEL_STYLE,
   FILTER_INPUT_STYLE,
@@ -18,6 +19,8 @@ type ToolbarProps = {
   onClear: () => void;
   onLanesChange: (value: number) => void;
   onFilterTextChange: (value: string) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
 };
 
 export function Toolbar({
@@ -30,6 +33,8 @@ export function Toolbar({
   onClear,
   onLanesChange,
   onFilterTextChange,
+  onZoomIn,
+  onZoomOut,
 }: ToolbarProps) {
   return (
     <div style={TOOLBAR_STYLE}>
@@ -52,6 +57,12 @@ export function Toolbar({
         onChange={(event) => onLanesChange(Number(event.target.value))}
         style={{ width: '120px' }}
       />
+      <button style={SMALL_BTN_STYLE} onClick={onZoomOut} title="Zoom out">
+        -
+      </button>
+      <button style={SMALL_BTN_STYLE} onClick={onZoomIn} title="Zoom in">
+        +
+      </button>
       <div style={{ width: '1px', height: '20px', background: '#1f2a38' }} />
       <input
         type="text"
