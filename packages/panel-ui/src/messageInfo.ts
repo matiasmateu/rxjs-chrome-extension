@@ -7,6 +7,12 @@ import {
   prettifyDomain,
 } from './formatters';
 
+/**
+ * Builds a UI-friendly summary model from a raw runtime/devtools message.
+ *
+ * @param message Raw message object shown in the tooltip panel.
+ * @returns Normalized message info used by `TooltipPanel`.
+ */
 export function extractMessageInfo(message: any): MessageInfo {
   const label = firstString(
     message?.source?.label,

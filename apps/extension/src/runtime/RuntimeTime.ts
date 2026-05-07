@@ -1,3 +1,9 @@
+/**
+ * Returns the first finite number found in the candidate values.
+ *
+ * @param values Candidate values checked in order.
+ * @returns First finite number or `undefined`.
+ */
 export function pickFirstNumber(...values: unknown[]): number | undefined {
   for (const value of values) {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -5,6 +11,12 @@ export function pickFirstNumber(...values: unknown[]): number | undefined {
   return undefined;
 }
 
+/**
+ * Formats a timestamp (milliseconds) as `HH:mm:ss.SSS`.
+ *
+ * @param ms Timestamp in milliseconds.
+ * @returns Local-time formatted string.
+ */
 export function fmtTime(ms: number): string {
   const d = new Date(ms);
   const h = String(d.getHours()).padStart(2, '0');

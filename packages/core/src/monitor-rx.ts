@@ -7,6 +7,13 @@ export type NotifyRxjsDevtoolsOptions = {
   appId?: string;
 };
 
+/**
+ * Sends a protocol message to the browser window transport used by the extension.
+ *
+ * @param msg Protocol message to publish.
+ * @param options Optional transport overrides.
+ * @returns Nothing. Fails silently in non-browser environments.
+ */
 export function notifyRxjsDevtools(
   msg: RxDevtoolsMessage,
   options: NotifyRxjsDevtoolsOptions = {},
@@ -54,6 +61,15 @@ export type SerializeOptions = {
   maxString?: number;
 };
 
+/**
+ * Serializes arbitrary values into a safe, bounded structure for transport.
+ *
+ * Handles circular references, depth/key limits, and long string truncation.
+ *
+ * @param value Raw value to serialize.
+ * @param opts Serialization limits.
+ * @returns Transport-safe value representation.
+ */
 export const safeSerialize = (value: unknown, opts: SerializeOptions = {}): unknown => {
   const { maxDepth = 6, maxKeys = 200, maxString = 20_000 } = opts;
   const seen = new WeakSet<object>();
@@ -139,6 +155,14 @@ export type MonitorRxOptions = {
   notify?: (msg: RxDevtoolsMessage) => void;
 };
 
+/**
+ * RxJS operator that reports lifecycle events (`subscribe`, `next`, `error`, `complete`,
+ * `unsubscribe`) to the devtools transport while preserving original stream behavior.
+ *
+ * @typeParam T Source observable value type.
+ * @param options Monitoring metadata and transport/serialization overrides.
+ * @returns `MonoTypeOperatorFunction<T>` that instruments the source observable.
+ */
 export const monitorRx =
   <T>(options: MonitorRxOptions = {}): MonoTypeOperatorFunction<T> =>
   (source: Observable<T>) => {
@@ -200,4 +224,7 @@ export const monitorRx =
     });
   };
 
+/**
+ * Alias for `monitorRx` kept for compatibility.
+ */
 export const monitorRX = monitorRx;

@@ -28,6 +28,12 @@ export type RxDevtoolsEvent = RxDevtoolsMessage;
 
 export const RXJS_DEVTOOLS_FROM = 'RXJS_HOOK' as const;
 
+/**
+ * Runtime guard for validating incoming devtools event payloads.
+ *
+ * @param value Unknown candidate payload.
+ * @returns `true` when the value satisfies the `RxDevtoolsEvent` contract.
+ */
 export function isRxDevtoolsEvent(value: unknown): value is RxDevtoolsEvent {
   if (!value || typeof value !== 'object') {
     return false;
