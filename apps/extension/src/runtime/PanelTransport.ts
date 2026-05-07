@@ -1,6 +1,9 @@
+import { PANEL_PORT_NAME } from '../transport-types';
+import type { PanelInitMessage, RuntimeBackgroundPayload } from '../transport-types';
+
 type PanelTransportOptions = {
   getInspectedTabId: () => number;
-  onPortMessage: (msg: any) => void;
+  onPortMessage: (msg: RuntimeBackgroundPayload) => void;
   onPortDisconnected: () => void;
   onPanelNavigated: () => void;
   onConnectError?: (error: unknown) => void;
@@ -8,11 +11,24 @@ type PanelTransportOptions = {
   autoReconnect?: boolean;
 };
 
+type RuntimePort = {
+  postMessage: (payload: unknown) => void;
+  disconnect: () => void;
+  onMessage: {
+    addListener: (listener: (msg: RuntimeBackgroundPayload) => void) => void;
+    removeListener: (listener: (msg: RuntimeBackgroundPayload) => void) => void;
+  };
+  onDisconnect: {
+    addListener: (listener: () => void) => void;
+    removeListener: (listener: () => void) => void;
+  };
+};
+
 export class PanelTransport {
   private options: PanelTransportOptions;
   private connecting = false;
   private reconnectTimer: number | null = null;
-  private port: any = null;
+  private port: RuntimePort | null = null;
 
   constructor(options: PanelTransportOptions) {
     this.options = options;
@@ -26,11 +42,13 @@ export class PanelTransport {
   }
 
   private postInit() {
+    const payload: PanelInitMessage = {
+      type: 'INIT',
+      tabId: this.options.getInspectedTabId(),
+    };
+
     try {
-      this.port?.postMessage({
-        type: 'INIT',
-        tabId: this.options.getInspectedTabId(),
-      });
+      this.port?.postMessage(payload);
     } catch {
       // no-op
     }
@@ -59,7 +77,7 @@ export class PanelTransport {
     this.connecting = true;
 
     try {
-      this.port = chrome.runtime.connect({ name: 'rxjs-panel' });
+      this.port = chrome.runtime.connect({ name: PANEL_PORT_NAME }) as RuntimePort;
       this.port.onMessage.addListener(this.options.onPortMessage);
       this.port.onDisconnect.addListener(this.handlePortDisconnect);
       this.postInit();

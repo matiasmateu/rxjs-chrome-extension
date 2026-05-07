@@ -22,6 +22,29 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     };
   };
 
+  type SubscriptionLike = {
+    unsubscribe: () => void;
+  };
+
+  type MaterializedObservableLike = {
+    subscribe: (handler: (notification: RxNotification) => void) => SubscriptionLike;
+  };
+
+  type ObservableLike = {
+    pipe: (operator: unknown) => MaterializedObservableLike;
+  };
+
+  type DevtoolsApi = {
+    register: (observable: ObservableLike, options?: RegisterOptions) => (() => void) | undefined;
+  };
+
+  type DevtoolsWindow = Window & {
+    rxjs?: RxjsRuntime;
+    __RXJS_DEVTOOLS__?: DevtoolsApi;
+  };
+
+  const windowWithDevtools = window as DevtoolsWindow;
+
   const dbg = (...args: unknown[]) => {
     if (!DEBUG) return;
     try {
@@ -94,11 +117,11 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     }
   }
 
-  function register(observable: any, options: RegisterOptions = {}) {
+  function register(observable: ObservableLike, options: RegisterOptions = {}) {
     const { key, label, domain, tags } = options;
     dbg('Register called', { key, label, domain });
 
-    const runtime = (window as any).rxjs as RxjsRuntime | undefined;
+    const runtime = windowWithDevtools.rxjs;
     const materialize = runtime?.operators?.materialize;
     if (!materialize) {
       console.warn('RxJS operators not found for DevTools');
@@ -107,7 +130,7 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     }
 
     const instanceId = `hook_${++instanceSeq}`;
-    const observableId = key || getObservableId(observable as object);
+    const observableId = key || getObservableId(observable);
     const sourceLabel = label || key || observableId;
     const source: NonNullable<RxDevtoolsMessage['source']> = { label: sourceLabel, operator: 'hook' };
     if (domain) source.domain = domain;
@@ -164,5 +187,5 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     };
   }
 
-  (window as any).__RXJS_DEVTOOLS__ = { register };
+  windowWithDevtools.__RXJS_DEVTOOLS__ = { register };
 })();

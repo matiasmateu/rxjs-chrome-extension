@@ -1,6 +1,6 @@
-import React, { useMemo, forwardRef } from '../react';
-import { TIP_TREE_STYLE } from '../styles';
-import { formatLeaf, previewValue, truncate } from '../utils';
+import { forwardRef, type JSX, useMemo } from 'react';
+import { TIP_TREE_STYLE } from './styles';
+import { formatLeaf, previewValue, truncate } from './json-tree-utils';
 
 type JsonTreeProps = {
   data: any;

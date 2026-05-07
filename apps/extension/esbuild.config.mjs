@@ -15,10 +15,7 @@ const ctx = await esbuild.context({
   format: 'esm',
   target: 'es2020',
   sourcemap: true,
-  jsx: 'transform',
-  jsxFactory: 'React.createElement',
-  jsxFragment: 'React.Fragment',
-  external: ['../vendor/react.esm.js', '../vendor/react-dom.esm.js'],
+  jsx: 'automatic',
 });
 
 if (watch) {

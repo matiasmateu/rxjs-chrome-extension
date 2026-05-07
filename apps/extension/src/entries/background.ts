@@ -1,17 +1,24 @@
 // background.ts (MV3 service worker)
-
-type Port = any;
+import { PANEL_PORT_NAME } from '../transport-types';
+import type {
+  PanelAckMessage,
+  RuntimeBackgroundPayload,
+} from '../transport-types';
+import {
+  createBackgroundPayload,
+  parsePanelInitMessage,
+} from '../transport-parser';
 
 const BUFFER_LIMIT = 200;
 
-// Map of tabId -> Set<Port> (one or more DevTools panels can be open per tab)
-const portsByTab = new Map<number, Set<Port>>();
+// Map of tabId -> Set<port> (one or more DevTools panels can be open per tab)
+const portsByTab = new Map<number, Set<ChromeRuntimePort>>();
 
 // Small per-tab buffer for events when the panel isn't connected yet.
-const bufferByTab = new Map<number, unknown[]>();
+const bufferByTab = new Map<number, RuntimeBackgroundPayload[]>();
 
-chrome.runtime.onConnect.addListener((port: Port) => {
-  if (port.name !== 'rxjs-panel') return;
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PANEL_PORT_NAME) return;
 
   let tabId: number | null = null;
 
@@ -25,9 +32,10 @@ chrome.runtime.onConnect.addListener((port: Port) => {
     }
   };
 
-  port.onMessage.addListener((msg: any) => {
-    if (msg?.type !== 'INIT' || !Number.isInteger(msg.tabId)) return;
-    tabId = msg.tabId;
+  port.onMessage.addListener((msg) => {
+    const initMessage = parsePanelInitMessage(msg);
+    if (!initMessage) return;
+    tabId = initMessage.tabId;
     if (!portsByTab.has(tabId)) {
       portsByTab.set(tabId, new Set());
     }
@@ -41,28 +49,17 @@ chrome.runtime.onConnect.addListener((port: Port) => {
       bufferByTab.delete(tabId);
     }
 
-    safePost(port, { type: 'ACK', tabId });
+    const ackPayload: PanelAckMessage = { type: 'ACK', tabId };
+    safePost(port, ackPayload);
   });
 
   port.onDisconnect.addListener(removePort);
 });
 
-chrome.runtime.onMessage.addListener((msg: any, sender: any, sendResponse: any) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tabId = sender?.tab?.id;
   if (typeof tabId === 'number') {
-    const eventType =
-      typeof msg?.type === 'string' && msg.type.trim().length > 0 ? msg.type : 'CONTENT_EVENT';
-
-    const payload = {
-      type: eventType,
-      tabId,
-      data: msg,
-      meta: {
-        origin: 'content-script',
-        time: Date.now(),
-        originalType: 'CONTENT_EVENT',
-      },
-    };
+    const payload: RuntimeBackgroundPayload = createBackgroundPayload(msg, tabId);
 
     forwardToPanel(tabId, payload);
     try {
@@ -76,7 +73,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender: any, sendResponse: any) 
   return false;
 });
 
-function forwardToPanel(tabId: number, payload: unknown) {
+function forwardToPanel(tabId: number, payload: RuntimeBackgroundPayload) {
   const set = portsByTab.get(tabId);
   if (!set || set.size === 0) {
     const buf = bufferByTab.get(tabId) ?? [];
@@ -100,7 +97,7 @@ function forwardToPanel(tabId: number, payload: unknown) {
   }
 }
 
-function safePost(port: Port, payload: unknown): boolean {
+function safePost(port: ChromeRuntimePort, payload: unknown): boolean {
   try {
     port.postMessage(payload);
     if (chrome.runtime.lastError) {

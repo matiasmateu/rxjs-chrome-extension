@@ -1,31 +1,19 @@
-import React from '../react';
-import type { MessageInfo, TooltipState } from '../types';
 import {
-  RIGHT_PANEL_STYLE,
   RIGHT_PANEL_EMPTY_STYLE,
-  TIP_STYLE,
-  TIP_HEADER_STYLE,
-  TIP_TITLE_STYLE,
+  RIGHT_PANEL_STYLE,
+  SMALL_BTN_STYLE,
   TIP_BTNS_STYLE,
-  TIP_SCROLL_STYLE,
   TIP_CONTENT_STYLE,
-  TIP_ROW_STYLE,
+  TIP_HEADER_STYLE,
   TIP_LABEL_STYLE,
   TIP_PILL_STYLE,
-  SMALL_BTN_STYLE,
-} from '../styles';
-import JsonTree from '../ui/JsonTree';
-
-type TooltipPanelProps = {
-  tooltipState: TooltipState;
-  messageInfo: MessageInfo | null;
-  copyLabel: string;
-  onCopy: () => void;
-  onDownload: () => void;
-  onPin: () => void;
-  onClose: () => void;
-  pinnedId: number | null;
-};
+  TIP_ROW_STYLE,
+  TIP_SCROLL_STYLE,
+  TIP_STYLE,
+  TIP_TITLE_STYLE,
+} from './styles';
+import type { TooltipPanelProps } from './types';
+import JsonTree from './JsonTree';
 
 export function TooltipPanel({
   tooltipState,
@@ -69,11 +57,7 @@ export function TooltipPanel({
             >
               {pinnedId != null ? 'Unpin' : 'Pin'}
             </button>
-            <button
-              style={SMALL_BTN_STYLE}
-              onClick={onClose}
-              disabled={!tooltipState.visible}
-            >
+            <button style={SMALL_BTN_STYLE} onClick={onClose} disabled={!tooltipState.visible}>
               Close
             </button>
           </div>
@@ -131,7 +115,9 @@ export function TooltipPanel({
               </div>
               <div>
                 <div style={TIP_LABEL_STYLE}>Data payload:</div>
-                {messageInfo && messageInfo.dataPayload !== null && messageInfo.dataPayload !== undefined ? (
+                {messageInfo &&
+                messageInfo.dataPayload !== null &&
+                messageInfo.dataPayload !== undefined ? (
                   <div style={{ marginTop: '4px' }}>
                     <JsonTree data={messageInfo.dataPayload} />
                   </div>

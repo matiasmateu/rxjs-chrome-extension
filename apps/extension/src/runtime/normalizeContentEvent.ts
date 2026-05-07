@@ -1,19 +1,20 @@
-import {
-  firstString,
-  isRxDevtoolsMessage,
-  normalizeRxKind,
-  pickFirstNumber,
-  sanitizeLaneKeyPart,
-} from '../utils';
+import { pickFirstNumber } from './RuntimeTime';
+import { normalizeRxKind } from './RxKind';
+import { firstString, sanitizeLaneKeyPart } from './StringUtils';
+import type { RuntimeBackgroundPayload, RuntimeContentPayload } from '../transport-types';
+import { decodeRuntimeTransportMessage } from '../transport-parser';
+import type {
+  NormalizedContentEvent,
+} from './runtime-types';
 
-export function normalizeContentEvent(msg: any) {
-  if (!msg || typeof msg !== 'object') return null;
-  const data = msg.data && typeof msg.data === 'object' ? msg.data : null;
-
-  const devtoolsCandidate = data?.message ?? msg.message;
-  if (!isRxDevtoolsMessage(devtoolsCandidate)) {
+export function normalizeContentEvent(input: unknown): NormalizedContentEvent | null {
+  const decoded = decodeRuntimeTransportMessage(input);
+  if (!decoded) {
     return null;
   }
+  const msg: RuntimeBackgroundPayload = decoded.background;
+  const content: RuntimeContentPayload | null = decoded.content;
+  const devtoolsCandidate = decoded.devtools;
 
   const rxKind = normalizeRxKind(devtoolsCandidate.kind);
   const kindLabel = rxKind ? rxKind.toUpperCase() : 'EVENT';
@@ -30,6 +31,7 @@ export function normalizeContentEvent(msg: any) {
   const timestamp =
     pickFirstNumber(devtoolsCandidate.ts, msg.meta?.time, msg.time, msg.ts, msg.timestamp) ??
     Date.now();
+  const tabId = typeof msg.tabId === 'number' ? msg.tabId : undefined;
 
   return {
     type: label ? `${kindLabel} • ${label}` : kindLabel,
@@ -46,7 +48,7 @@ export function normalizeContentEvent(msg: any) {
     meta: devtoolsCandidate.meta,
     source: devtoolsCandidate.source,
     laneKey,
-    tabId: msg.tabId,
-    raw: { background: msg, content: data, devtools: devtoolsCandidate },
+    tabId,
+    raw: { background: msg, content, devtools: devtoolsCandidate },
   };
 }

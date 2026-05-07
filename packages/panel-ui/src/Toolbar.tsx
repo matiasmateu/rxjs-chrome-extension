@@ -1,23 +1,12 @@
-import React from '../react';
 import {
-  TOOLBAR_STYLE,
   BASE_BTN_STYLE,
-  SMALL_BTN_STYLE,
-  TITLE_STYLE,
   FILTER_INPUT_STYLE,
+  SMALL_BTN_STYLE,
   STATS_STYLE,
-} from '../styles';
-
-type ToolbarProps = {
-  running: boolean;
-  filterText: string;
-  statsText: string;
-  onToggleRunning: () => void;
-  onClear: () => void;
-  onFilterTextChange: (value: string) => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-};
+  TITLE_STYLE,
+  TOOLBAR_STYLE,
+} from './styles';
+import type { ToolbarProps } from './types';
 
 export function Toolbar({
   running,

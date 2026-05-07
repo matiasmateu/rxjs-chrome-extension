@@ -1,4 +1,4 @@
-import { normalizeRxKind } from '../utils';
+import { normalizeRxKind } from './RxKind';
 
 type LaneStatus = {
   activeCount: number;

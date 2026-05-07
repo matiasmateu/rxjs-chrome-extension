@@ -1,5 +1,4 @@
-import React from '../react';
-import { LEGEND_STYLE } from '../styles';
+import { LEGEND_STYLE } from './styles';
 
 export function Legend() {
   return (

@@ -1,12 +1,16 @@
 import type { TooltipState } from '../types';
-import { drawRxKindGlyph, extractFilterTags, fmtTime, hashColor, truncate } from '../utils';
-import { DISABLED_LANE_STROKE, DISABLED_MARBLE_COLOR, HOVER_ICON_COLOR, MAX_AUTO_LANES as DEFAULT_MAX_AUTO_LANES, NOW_MARKER_OFFSET, PX_PER_SEC, SELECTED_GLOW_COLOR, SELECTED_RING_COLOR, ZOOM_IN_FACTOR, ZOOM_MAX, ZOOM_MIN, ZOOM_OUT_FACTOR } from './constants';
+import { drawGrid, drawMarbles } from './CanvasRenderer';
+import { MAX_AUTO_LANES as DEFAULT_MAX_AUTO_LANES } from './constants';
 import { FilterRegistry } from './FilterRegistry';
+import { InteractionController } from './InteractionController';
 import { LaneActivity } from './LaneActivity';
 import { LaneLayout } from './LaneLayout';
+import { MarbleStore } from './MarbleStore';
 import { normalizeContentEvent as normalizeContentEventPayload } from './normalizeContentEvent';
-import { PanelTransport } from './PanelTransport';
-import type { Marble, RuntimeOptions } from './runtime-types';
+import { RuntimeTransportAdapter, type RuntimeTransportEvent } from './RuntimeTransportAdapter';
+import { buildTooltipState, tooltipStateChanged } from './TooltipStateBuilder';
+import { laneYForIndex, xForTime } from './ViewportMath';
+import type { NormalizedContentEvent, RuntimeMarbleMessage, RuntimeOptions } from './runtime-types';
 
 export const MAX_AUTO_LANES = DEFAULT_MAX_AUTO_LANES;
 
@@ -32,10 +36,7 @@ export class MarblePanelRuntime {
   filters: FilterRegistry;
   laneLayout: LaneLayout;
   laneActivity: LaneActivity;
-
-  marbles: Marble[];
-  nextId: number;
-  totalEvents: number;
+  marbleStore: MarbleStore;
 
   hoverId: number | null;
   pinnedId: number | null;
@@ -43,62 +44,32 @@ export class MarblePanelRuntime {
   
   filteredLaneMap: Map<number, number>;
 
-  mouse: { x: number; y: number; down: boolean };
-  dragStart: { x: number; y: number; offsetX: number; offsetY: number } | null;
+  interactions: InteractionController;
 
-  transport: PanelTransport;
-  demoTimer: number | null;
+  transport: RuntimeTransportAdapter;
 
   animationFrame: number | null;
   resizeObserver: ResizeObserver | null;
 
-  handlePortMessage = (msg: any) => {
-    this.renderMessage(msg);
-  };
+  get marbles() {
+    return this.marbleStore.marbles;
+  }
 
-  handleMouseMove = (e: MouseEvent) => {
-    if (!this.canvas) return;
-    const rect = this.canvas.getBoundingClientRect();
-    this.mouse.x = e.clientX - rect.left;
-    this.mouse.y = e.clientY - rect.top;
-  };
-
-  handleMouseDown = () => {
-    this.mouse.down = true;
-    this.dragStart = {
-      x: this.mouse.x,
-      y: this.mouse.y,
-      offsetX: this.worldOffsetPx,
-      offsetY: this.worldOffsetPy,
-    };
-  };
-
-  handleMouseUp = () => {
-    this.mouse.down = false;
-    this.dragStart = null;
-  };
-
-  handleWheel = (e: WheelEvent) => {
-    if (e.shiftKey) return;
-    e.preventDefault();
-    const delta = Math.sign(e.deltaY);
-    const factor = delta > 0 ? ZOOM_OUT_FACTOR : ZOOM_IN_FACTOR;
-    this.zoomAtX(this.width - NOW_MARKER_OFFSET, factor);
-  };
-
-  handleCanvasClick = () => {
-    if (this.hoverId) {
-      this.setPinned(this.hoverId);
-    } else {
-      this.setPinned(null);
-      this.publishTooltip(null);
+  handleTransportEvent = (event: RuntimeTransportEvent) => {
+    if (event.type === 'message') {
+      this.renderMessage(event.payload);
+      return;
     }
-  };
-
-  handleKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      this.toggleRunningFromRuntime();
+    if (event.type === 'disconnected') {
+      this.pushMarble({ type: 'INFO', text: 'Port disconnected. Reconnecting…' });
+      return;
+    }
+    if (event.type === 'navigated') {
+      this.pushMarble({ type: 'NAVIGATED' });
+      return;
+    }
+    if (event.type === 'connect-error') {
+      console.error('Failed to connect', event.error);
     }
   };
 
@@ -107,30 +78,23 @@ export class MarblePanelRuntime {
   };
 
   setZoom = (next: number) => {
-    this.xZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+    this.interactions.setZoom(next);
   };
 
   zoomAtX = (anchorX: number, factor: number) => {
-    const prevZoom = this.xZoom;
-    const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prevZoom * factor));
-    if (nextZoom === prevZoom) return;
-    const anchor = Number.isFinite(anchorX) ? anchorX : this.width - NOW_MARKER_OFFSET;
-    const anchorOffset = this.width - NOW_MARKER_OFFSET - anchor;
-    const dtSec = (anchorOffset + this.worldOffsetPx) / (PX_PER_SEC * prevZoom);
-    this.xZoom = nextZoom;
-    this.worldOffsetPx = 0; // keep the "now" marker anchored when zooming
+    this.interactions.zoomAtX(anchorX, factor);
   };
 
   zoomByFactor = (factor: number) => {
-    this.setZoom(this.xZoom * factor);
+    this.interactions.zoomByFactor(factor);
   };
 
   zoomIn = () => {
-    this.zoomAtX(this.width - NOW_MARKER_OFFSET, ZOOM_IN_FACTOR);
+    this.interactions.zoomIn();
   };
 
   zoomOut = () => {
-    this.zoomAtX(this.width - NOW_MARKER_OFFSET, ZOOM_OUT_FACTOR);
+    this.interactions.zoomOut();
   };
 
   frame = () => {
@@ -139,19 +103,45 @@ export class MarblePanelRuntime {
     }
 
     this.layout();
-    this.drawGrid();
-    this.drawMarbles();
+    if (this.ctx) {
+      drawGrid({
+        ctx: this.ctx,
+        width: this.width,
+        height: this.height,
+        timeOriginMs: this.timeOriginMs,
+        xZoom: this.xZoom,
+        worldOffsetPx: this.worldOffsetPx,
+        worldOffsetPy: this.worldOffsetPy,
+        filters: this.filters,
+        laneLayout: this.laneLayout,
+        laneActivity: this.laneActivity,
+        marbles: this.marbles,
+        filteredLaneMap: this.filteredLaneMap,
+      });
+      const marbleResult = drawMarbles({
+        ctx: this.ctx,
+        width: this.width,
+        height: this.height,
+        timeOriginMs: this.timeOriginMs,
+        xZoom: this.xZoom,
+        worldOffsetPx: this.worldOffsetPx,
+        worldOffsetPy: this.worldOffsetPy,
+        filters: this.filters,
+        laneLayout: this.laneLayout,
+        laneActivity: this.laneActivity,
+        marbles: this.marbles,
+        filteredLaneMap: this.filteredLaneMap,
+        mouse: this.interactions.mouse,
+        dragStart: this.interactions.dragStart,
+        pinnedId: this.pinnedId,
+      });
+      this.hoverId = marbleResult.hoverId;
+      this.worldOffsetPx = marbleResult.worldOffsetPx;
+      this.worldOffsetPy = marbleResult.worldOffsetPy;
+    }
     this.updateTooltipState();
 
     this.animationFrame = requestAnimationFrame(this.frame);
-  };
-
-  handlePortDisconnect = () => {
-    this.pushMarble({ type: 'INFO', text: 'Port disconnected. Reconnecting…' });
-  };
-
-  handleNavigated = () => {
-    this.pushMarble({ type: 'NAVIGATED' });
   };
 
   constructor({
@@ -190,29 +180,43 @@ export class MarblePanelRuntime {
     this.filters = new FilterRegistry(initialFilter, initialDomainFilter, setFilterOptions);
     this.laneLayout = new LaneLayout(initialLanes, maxAutoLanes, syncLaneCount);
     this.laneActivity = new LaneActivity();
-
-    this.marbles = [];
-    this.nextId = 1;
-    this.totalEvents = 0;
+    this.marbleStore = new MarbleStore({
+      filters: this.filters,
+      laneLayout: this.laneLayout,
+      laneActivity: this.laneActivity,
+      onStatsChange: (count) => this.setStatsText(`${count} event${count === 1 ? '' : 's'}`),
+    });
 
     this.hoverId = null;
     this.pinnedId = null;
     this.lastTooltipPayload = null;
     this.filteredLaneMap = new Map();
 
-    this.mouse = { x: 0, y: 0, down: false };
-    this.dragStart = null;
+    this.interactions = new InteractionController({
+      getCanvas: () => this.canvas,
+      getViewportState: () => ({
+        width: this.width,
+        xZoom: this.xZoom,
+        worldOffsetPx: this.worldOffsetPx,
+        worldOffsetPy: this.worldOffsetPy,
+      }),
+      updateViewportState: (patch) => {
+        if (patch.xZoom != null) this.xZoom = patch.xZoom;
+        if (patch.worldOffsetPx != null) this.worldOffsetPx = patch.worldOffsetPx;
+        if (patch.worldOffsetPy != null) this.worldOffsetPy = patch.worldOffsetPy;
+      },
+      getHoverId: () => this.hoverId,
+      onPin: (id) => this.setPinned(id),
+      onClearTooltip: () => this.publishTooltip(null),
+      onToggleRunning: () => this.toggleRunningFromRuntime(),
+    });
 
-    this.transport = new PanelTransport({
+    this.transport = new RuntimeTransportAdapter({
       getInspectedTabId: () => chrome.devtools.inspectedWindow.tabId,
-      onPortMessage: this.handlePortMessage,
-      onPortDisconnected: this.handlePortDisconnect,
-      onPanelNavigated: this.handleNavigated,
-      onConnectError: (error) => console.error('Failed to connect', error),
+      onEvent: this.handleTransportEvent,
       reconnectDelayMs: 500,
       autoReconnect: true,
     });
-    this.demoTimer = null;
 
     this.animationFrame = null;
     this.resizeObserver = null;
@@ -225,12 +229,12 @@ export class MarblePanelRuntime {
 
     this.fitCanvas();
 
-    this.canvas.addEventListener('mousemove', this.handleMouseMove);
-    this.canvas.addEventListener('mousedown', this.handleMouseDown);
-    this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
-    this.canvas.addEventListener('click', this.handleCanvasClick);
-    window.addEventListener('mouseup', this.handleMouseUp);
-    window.addEventListener('keydown', this.handleKeyDown);
+    this.canvas.addEventListener('mousemove', this.interactions.handleMouseMove);
+    this.canvas.addEventListener('mousedown', this.interactions.handleMouseDown);
+    this.canvas.addEventListener('wheel', this.interactions.handleWheel, { passive: false });
+    this.canvas.addEventListener('click', this.interactions.handleCanvasClick);
+    window.addEventListener('mouseup', this.interactions.handleMouseUp);
+    window.addEventListener('keydown', this.interactions.handleKeyDown);
     window.addEventListener('unload', this.handleUnload);
 
     this.resizeObserver = new ResizeObserver(() => this.layout());
@@ -239,8 +243,7 @@ export class MarblePanelRuntime {
     this.layout();
     this.animationFrame = requestAnimationFrame(this.frame);
 
-    this.connect();
-    this.startDemoMode();
+    this.transport.connect();
   }
 
   dispose() {
@@ -249,12 +252,12 @@ export class MarblePanelRuntime {
       this.animationFrame = null;
     }
 
-    this.canvas?.removeEventListener('mousemove', this.handleMouseMove);
-    this.canvas?.removeEventListener('mousedown', this.handleMouseDown);
-    this.canvas?.removeEventListener('wheel', this.handleWheel);
-    this.canvas?.removeEventListener('click', this.handleCanvasClick);
-    window.removeEventListener('mouseup', this.handleMouseUp);
-    window.removeEventListener('keydown', this.handleKeyDown);
+    this.canvas?.removeEventListener('mousemove', this.interactions.handleMouseMove);
+    this.canvas?.removeEventListener('mousedown', this.interactions.handleMouseDown);
+    this.canvas?.removeEventListener('wheel', this.interactions.handleWheel);
+    this.canvas?.removeEventListener('click', this.interactions.handleCanvasClick);
+    window.removeEventListener('mouseup', this.interactions.handleMouseUp);
+    window.removeEventListener('keydown', this.interactions.handleKeyDown);
     window.removeEventListener('unload', this.handleUnload);
 
     if (this.resizeObserver) {
@@ -263,12 +266,6 @@ export class MarblePanelRuntime {
     }
 
     this.transport.disconnect();
-
-    if (this.demoTimer) {
-      clearInterval(this.demoTimer);
-      this.demoTimer = null;
-    }
-
   }
 
   layout() {
@@ -296,305 +293,40 @@ export class MarblePanelRuntime {
     }
   }
 
-  applyYTransform = (y: number) => {
-    return y + this.worldOffsetPy;
-  };
-
-  laneY(lane: number) {
-    const baseY = this.laneLayout.laneY(lane, this.height);
-    return this.applyYTransform(baseY);
-  }
-
-  xForTime(ms: number) {
-    const dtSec = (this.timeOriginMs - ms) / 1000;
-    return this.width - NOW_MARKER_OFFSET - dtSec * PX_PER_SEC * this.xZoom + this.worldOffsetPx;
-  }
-
-  drawGrid() {
-    if (!this.ctx) return;
-
-    const ctx = this.ctx;
-    ctx.lineCap = 'butt';
-    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
-    gradient.addColorStop(0, '#0b0f14');
-    gradient.addColorStop(1, '#0a131d');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    // Draw alternating background colors for each observable group
-    if (this.laneLayout.groupBoundaries.length) {
-      const colors = ['rgba(30, 58, 138, 0.08)', 'rgba(17, 24, 39, 0.08)']; // Subtle blue and dark
-      for (let i = 0; i < this.laneLayout.groupBoundaries.length; i++) {
-        const group = this.laneLayout.groupBoundaries[i];
-        const startY = this.laneY(group.start);
-        const endY = this.laneY(Math.max(group.start, group.end - 1));
-        const height = endY - startY + (this.laneLayout.laneMetrics(this.height).step);
-        
-        ctx.fillStyle = colors[i % 2];
-        ctx.fillRect(0, startY - (this.laneLayout.laneMetrics(this.height).step / 2), this.width, height);
-      }
-    }
-
-    ctx.strokeStyle = '#1e2a38';
-    ctx.fillStyle = '#9fb6cf';
-    ctx.font = '11px ui-sans-serif, system-ui';
-    ctx.textAlign = 'center';
-
-    const rightMs = this.timeOriginMs;
-    const rightSec = Math.floor(rightMs / 1000) * 1000;
-
-    ctx.beginPath();
-    for (let t = rightSec; ; t -= 1000) {
-      const x = this.xForTime(t);
-      if (x < -50) break;
-      if (x <= this.width + 50) {
-        ctx.moveTo(x, 18);
-        ctx.lineTo(x, this.height);
-        ctx.fillText(fmtTime(t), x, 12);
-      }
-    }
-    ctx.stroke();
-
-    // Draw thin dashed lines and labels for each subscription
-    const labelWidth = 200; // Reserve space on the left for labels
-    
-    if (this.laneLayout.groupBoundaries.length) {
-      ctx.setLineDash([2, 4]);
-      ctx.lineWidth = 0.5;
-      ctx.font = '11px ui-sans-serif, system-ui';
-      ctx.textAlign = 'left';
-      
-      // Create a filtered lane mapping when domain filter is active
-      this.filteredLaneMap.clear();
-      let filteredLaneIndex = 0;
-      
-      if (this.filters.filterDomain) {
-        for (let lane = 0; lane < this.laneLayout.lanes; lane++) {
-          const laneKeys = this.laneLayout.laneIndexMap[lane];
-          if (!laneKeys || laneKeys.size === 0) continue;
-          
-          // Check if this lane has any marbles that match the filter
-          let hasMatch = false;
-          for (const key of laneKeys) {
-            const sampleMarble = this.marbles.find(m => m.laneKey === key);
-            if (sampleMarble && this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
-              hasMatch = true;
-              break;
-            }
-          }
-          
-          if (hasMatch) {
-            this.filteredLaneMap.set(lane, filteredLaneIndex);
-            filteredLaneIndex++;
-          }
-        }
-      }
-      
-      for (const group of this.laneLayout.groupBoundaries) {
-        // For single-lane groups, use the group label directly
-        if (group.size === 1) {
-          // Check if this lane has any marbles that match the filter
-          const laneKeys = this.laneLayout.laneIndexMap[group.start];
-          if (!laneKeys || laneKeys.size === 0) continue;
-          
-          // Check if any marble on this lane matches the domain filter
-          let hasMatchingMarble = false;
-          for (const key of laneKeys) {
-            const sampleMarble = this.marbles.find(m => m.laneKey === key);
-            if (sampleMarble && this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
-              hasMatchingMarble = true;
-              break;
-            }
-          }
-          
-          if (!hasMatchingMarble && this.filters.filterDomain) continue;
-          
-          // Use filtered lane index if domain filter is active
-          const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(group.start) 
-            ? this.filteredLaneMap.get(group.start)! 
-            : group.start;
-          const laneY = this.laneY(displayLane);
-          const label = this.laneLayout.groupLabels.get(group.key) || group.key;
-          const isDisabled = this.laneActivity.isLaneDisabledForIndex(group.start, this.laneLayout.laneIndexMap);
-          
-          // Draw dashed line
-          ctx.strokeStyle = isDisabled ? DISABLED_LANE_STROKE : 'rgba(100, 116, 139, 0.3)';
-          ctx.beginPath();
-          ctx.moveTo(labelWidth, laneY);
-          ctx.lineTo(this.width, laneY);
-          ctx.stroke();
-          
-          // Draw label
-          ctx.fillStyle = isDisabled ? '#6b7280' : '#94a3b8';
-          ctx.fillText(truncate(label, 35), 8, laneY - 2);
-        } else {
-          // For multi-lane groups, iterate through each subscription
-          // Get all observables for this group
-          const allObservablesInGroup: Array<{ domain: string; key: string; absoluteLane: number }> = [];
-          
-          for (const domain of this.laneLayout.domainOrder) {
-            const info = this.laneLayout.domainMap.get(domain);
-            if (!info) continue;
-            
-            for (const [key, absoluteLane] of info.actions.entries()) {
-              if (absoluteLane >= group.start && absoluteLane < group.end) {
-                allObservablesInGroup.push({ domain, key, absoluteLane });
-              }
-            }
-          }
-          
-          // Sort by absolute lane
-          allObservablesInGroup.sort((a, b) => a.absoluteLane - b.absoluteLane);
-          
-          // Draw each subscription
-          for (const { key, absoluteLane } of allObservablesInGroup) {
-            // Check if this lane has any marbles that match the filter
-            const sampleMarble = this.marbles.find(m => m.laneKey === key);
-            if (this.filters.filterDomain && (!sampleMarble || !this.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters))) {
-              continue;
-            }
-            
-            // Use filtered lane index if domain filter is active
-            const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(absoluteLane)
-              ? this.filteredLaneMap.get(absoluteLane)!
-              : absoluteLane;
-            const laneY = this.laneY(displayLane);
-            const isDisabled = this.laneActivity.isLaneDisabledForIndex(absoluteLane, this.laneLayout.laneIndexMap);
-            
-            // Draw dashed line
-            ctx.strokeStyle = isDisabled ? DISABLED_LANE_STROKE : 'rgba(100, 116, 139, 0.3)';
-            ctx.beginPath();
-            ctx.moveTo(labelWidth, laneY);
-            ctx.lineTo(this.width, laneY);
-            ctx.stroke();
-            
-            // Get the label from metadata
-            const info = this.laneLayout.domainMap.get(this.laneLayout.extractLaneParts(key).domain);
-            const metadata = info?.metadata.get(key);
-            const label = metadata?.label || key.split('/').pop() || key;
-            
-            // Draw label
-            ctx.fillStyle = isDisabled ? '#6b7280' : '#94a3b8';
-            ctx.fillText(truncate(label, 35), 8, laneY - 2);
-          }
-        }
-      }
-      
-      // Reset line dash
-      ctx.setLineDash([]);
-    }
-
-    ctx.fillStyle = '#7aa2d3';
-    ctx.fillRect(this.width - NOW_MARKER_OFFSET, 0, 2, this.height);
-    ctx.textAlign = 'right';
-    ctx.fillText(`now ${fmtTime(rightMs)}`, this.width - (NOW_MARKER_OFFSET + 4), 12);
-    ctx.textAlign = 'left';
-  }
-
-  drawMarbles() {
-    if (!this.ctx) return;
-
-    const ctx = this.ctx;
-    this.hoverId = null;
-
-    if (this.mouse.down && this.dragStart) {
-      const dy = this.mouse.y - this.dragStart.y;
-      this.worldOffsetPy = this.dragStart.offsetY + dy;
-      this.worldOffsetPx = 0; // lock horizontal position so marbles stay on the "now" line
-    }
-
-    for (let i = this.marbles.length - 1; i >= 0; i--) {
-      const marble = this.marbles[i];
-      const x = this.xForTime(marble.timeMs);
-      if (x < -40 || x > this.width + 40) continue;
-
-      const label = (marble.msg?.type || '').toString();
-      const tags = marble.filters || null;
-
-      if (!this.filters.matches(label, tags)) continue;
-
-      // Use filtered lane position if domain filter is active
-      const displayLane = this.filters.filterDomain && this.filteredLaneMap.has(marble.lane)
-        ? this.filteredLaneMap.get(marble.lane)!
-        : marble.lane;
-      const y = this.laneY(displayLane);
-
-      const laneDisabled = this.laneActivity.isLaneDisabled(marble.laneKey);
-      const dx = this.mouse.x - x;
-      const dy = this.mouse.y - y;
-      const isHover = dx * dx + dy * dy < (marble.r + 6) * (marble.r + 6);
-      if (isHover) {
-        this.hoverId = marble.id;
-      }
-      const isPinned = this.pinnedId === marble.id;
-      if (isPinned) {
-        const ringRadius = marble.r + 7;
-        ctx.save();
-        ctx.beginPath();
-        ctx.strokeStyle = SELECTED_RING_COLOR;
-        ctx.lineWidth = 2;
-        ctx.shadowColor = SELECTED_GLOW_COLOR;
-        ctx.shadowBlur = 12;
-        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-      const baseColor = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
-      const color = isHover && !isPinned ? HOVER_ICON_COLOR : baseColor;
-      drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
-    }
-  }
-
   updateTooltipState() {
     const targetId = this.pinnedId ?? this.hoverId;
     const marble = targetId ? this.marbles.find((m) => m.id === targetId) : null;
 
     if (!marble) {
-      if (this.lastTooltipPayload?.visible) {
-        this.publishTooltip(null);
-      } else {
-        this.publishTooltip(null, true);
-      }
+      this.publishTooltip(buildTooltipState({
+        marble: null,
+        pinnedId: this.pinnedId,
+        hoverId: this.hoverId,
+      }), !this.lastTooltipPayload?.visible);
       return;
     }
 
-    const y = this.laneY(marble.lane);
-    const x = this.xForTime(marble.timeMs);
+    const position = {
+      x: xForTime(this, marble.timeMs),
+      y: laneYForIndex(this, marble.lane),
+    };
 
-    this.publishTooltip({
-      visible: true,
-      id: marble.id,
-      pinned: this.pinnedId != null,
-      canPin: this.pinnedId != null || this.hoverId != null,
-      title: `${marble.msg?.type ?? 'Event'} • id:${marble.id} • ${fmtTime(marble.timeMs)}`,
-      message: marble.msg,
-      position: { x, y },
-    });
+    this.publishTooltip(buildTooltipState({
+      marble,
+      pinnedId: this.pinnedId,
+      hoverId: this.hoverId,
+      position,
+    }));
   }
 
   publishTooltip(payload: TooltipState | null, silent = false) {
-    const normalized =
-      payload || ({
-        visible: false,
-        pinned: this.pinnedId != null,
-        canPin: this.pinnedId != null || this.hoverId != null,
-        message: null,
-        position: { x: 0, y: 0 },
-      } as TooltipState);
+    const normalized = payload || buildTooltipState({
+      marble: null,
+      pinnedId: this.pinnedId,
+      hoverId: this.hoverId,
+    });
 
-    const prev = this.lastTooltipPayload;
-    const changed =
-      !prev ||
-      prev.visible !== normalized.visible ||
-      prev.id !== normalized.id ||
-      prev.pinned !== normalized.pinned ||
-      prev.canPin !== normalized.canPin ||
-      prev.message !== normalized.message ||
-      prev.position?.x !== normalized.position?.x ||
-      prev.position?.y !== normalized.position?.y ||
-      prev.title !== normalized.title;
-
-    if (changed) {
+    if (tooltipStateChanged(this.lastTooltipPayload, normalized)) {
       this.lastTooltipPayload = normalized;
       if (!silent) this.setTooltipState(normalized);
     }
@@ -632,9 +364,7 @@ export class MarblePanelRuntime {
   }
 
   clear() {
-    this.marbles.length = 0;
-    this.totalEvents = 0;
-    this.publishStats();
+    this.marbleStore.clear();
     this.setPinned(null);
     this.hoverId = null;
     this.publishTooltip(null);
@@ -644,97 +374,18 @@ export class MarblePanelRuntime {
     this.laneLayout.updateStructure(false, this.marbles);
   }
 
-  publishStats() {
-    const count = this.totalEvents;
-    this.setStatsText(`${count} event${count === 1 ? '' : 's'}`);
-  }
-
-  normalizeContentEvent(msg: any) {
+  normalizeContentEvent(msg: unknown): NormalizedContentEvent | null {
     return normalizeContentEventPayload(msg);
   }
 
-  renderMessage(msg: any) {
+  renderMessage(msg: unknown) {
     const normalized = this.normalizeContentEvent(msg);
     if (normalized) {
       this.pushMarble(normalized);
     }
   }
 
-  connect() {
-    this.transport.connect();
-  }
-
-  startDemoMode() {
-    const demoObservables = ['demo_obs_1', 'demo_obs_2', 'demo_obs_3'];
-    this.demoTimer = window.setInterval(() => {
-      if (this.totalEvents > 0) {
-        clearInterval(this.demoTimer!);
-        this.demoTimer = null;
-        return;
-      }
-      const kinds = ['subscribe', 'next', 'complete', 'error', 'unsubscribe'];
-      const kind = kinds[Math.floor(Math.random() * kinds.length)];
-      const idx = Math.floor(Math.random() * demoObservables.length);
-      const ts = Date.now();
-      const message = {
-        kind,
-        observableId: demoObservables[idx],
-        instanceId: `demo_inst_${idx + 1}`,
-        subscriptionId: `demo_sub_${idx + 1}`,
-        ts,
-        data: kind === 'next' ? { value: Math.round(Math.random() * 100) } : null,
-        source: {
-          domain: 'demo',
-          label: `Demo ${idx + 1}`,
-          operator: 'demo',
-        },
-      };
-      this.renderMessage({ data: { message } });
-    }, 600);
-  }
-
-  pushMarble(msg: any) {
-    let time = Date.now();
-    const candidate = msg && (msg.time ?? msg.ts ?? msg.timestamp ?? msg.date ?? msg.t);
-    if (typeof candidate === 'number') {
-      time = candidate;
-    } else if (typeof candidate === 'string') {
-      const parsed = Date.parse(candidate);
-      if (!Number.isNaN(parsed)) time = parsed;
-    }
-
-    const type = msg && msg.type ? String(msg.type) : 'UNKNOWN';
-    const laneSource = msg?.laneKey ?? msg?.label ?? type;
-    const laneKey = laneSource == null ? type : String(laneSource);
-    this.laneLayout.registerGroupLabel(laneKey, msg);
-    this.laneActivity.update(laneKey, msg?.rxKind, msg?.subscriptionId);
-    const lane = this.laneLayout.resolveLaneKey(laneKey, this.marbles, msg);
-
-    let color = hashColor(type);
-    if (msg && msg.color != null) {
-      if (typeof msg.color === 'string') {
-        color = msg.color;
-      } else if (typeof msg.color === 'number' && Number.isFinite(msg.color)) {
-        const hue = ((msg.color % 360) + 360) % 360;
-        color = `hsl(${hue}, 70%, 55%)`;
-      }
-    }
-
-    const filters = extractFilterTags(msg || {});
-
-    const marble: Marble = {
-      id: this.nextId++,
-      timeMs: time,
-      r: 7,
-      color,
-      msg,
-      laneKey,
-      lane,
-      filters,
-    };
-    this.marbles.push(marble);
-    this.filters.ingest(filters);
-    this.totalEvents++;
-    this.publishStats();
+  pushMarble(msg: RuntimeMarbleMessage) {
+    this.marbleStore.push(msg);
   }
 }

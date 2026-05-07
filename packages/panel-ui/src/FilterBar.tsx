@@ -1,18 +1,11 @@
-import React from '../react';
-import type { FilterOption } from '../types';
 import {
   FILTER_BAR_STYLE,
-  FILTER_GROUP_STYLE,
-  FILTER_GROUP_LABEL_STYLE,
-  FILTER_CHIP_STYLE,
   FILTER_CHIP_ACTIVE_STYLE,
-} from '../styles';
-
-type FilterBarProps = {
-  domains: FilterOption[];
-  activeDomain: string;
-  onSelectDomain: (value: string) => void;
-};
+  FILTER_CHIP_STYLE,
+  FILTER_GROUP_LABEL_STYLE,
+  FILTER_GROUP_STYLE,
+} from './styles';
+import type { FilterBarProps, FilterOption } from './types';
 
 export function FilterBar({ domains, activeDomain, onSelectDomain }: FilterBarProps) {
   const renderFilterGroup = (

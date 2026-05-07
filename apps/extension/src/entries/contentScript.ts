@@ -1,4 +1,5 @@
-import { RXJS_DEVTOOLS_FROM, isRxDevtoolsEvent } from '@rxjs-devtools/core/protocol';
+import type { RuntimeContentForwardMessage } from '../transport-types';
+import { parsePageHookForwardMessage } from '../transport-parser';
 
 const RETRY_DELAY_MS = 200;
 
@@ -13,7 +14,7 @@ const RETRY_DELAY_MS = 200;
 })();
 
 // Forward page -> background with a queue to tolerate background wakeups.
-const queue: unknown[] = [];
+const queue: RuntimeContentForwardMessage[] = [];
 let sending = false;
 
 function flushQueue() {
@@ -21,6 +22,10 @@ function flushQueue() {
   sending = true;
 
   const msg = queue.shift();
+  if (!msg) {
+    sending = false;
+    return;
+  }
 
   chrome.runtime.sendMessage(msg, () => {
     const err = chrome.runtime.lastError?.message;
@@ -38,23 +43,18 @@ function flushQueue() {
   });
 }
 
-function forwardToBackground(payload: unknown) {
+function forwardToBackground(payload: RuntimeContentForwardMessage) {
   queue.push(payload);
   flushQueue();
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window) return;
-  const msg = event.data as any;
-  if (!msg || msg.__from !== RXJS_DEVTOOLS_FROM) return;
-  if (!isRxDevtoolsEvent(msg.message)) return;
+  const payload = parsePageHookForwardMessage(event.data);
+  if (!payload) return;
 
   try {
-    forwardToBackground({
-      ...msg,
-      __from: 'CONTENT_SCRIPT',
-      time: Date.now(),
-    });
+    forwardToBackground(payload);
   } catch {
     // no-op
   }

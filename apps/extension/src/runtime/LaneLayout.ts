@@ -1,6 +1,6 @@
-import { firstString } from '../utils';
+import { firstString } from './StringUtils';
 import { LANE_GROUP_GAP, LANE_MIN_STEP, LANE_PAD } from './constants';
-import type { DomainInfo, GroupBoundary, Marble } from './runtime-types';
+import type { DomainInfo, GroupBoundary, Marble, RuntimeMarbleMessage } from './runtime-types';
 
 export class LaneLayout {
   lanes: number;
@@ -49,7 +49,7 @@ export class LaneLayout {
     return { key, domain: normalizedDomain };
   };
 
-  registerGroupLabel = (laneKey: string, msg: any) => {
+  registerGroupLabel = (laneKey: string, msg: RuntimeMarbleMessage) => {
     const { key, domain } = this.extractLaneParts(laneKey);
     if (!domain) return;
     const existing = this.groupLabels.get(domain);
@@ -66,7 +66,7 @@ export class LaneLayout {
     }
   };
 
-  resolveLaneKey = (rawKey: string, marbles: Marble[], msg?: any) => {
+  resolveLaneKey = (rawKey: string, marbles: Marble[], msg?: RuntimeMarbleMessage) => {
     return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true, marbles, msg));
   };
 
@@ -74,7 +74,7 @@ export class LaneLayout {
     rawKey: string,
     createIfMissing: boolean,
     marbles: Marble[] = [],
-    msg?: any,
+    msg?: RuntimeMarbleMessage,
   ) => {
     const { key, domain } = this.extractLaneParts(rawKey);
     let info = this.domainMap.get(domain);

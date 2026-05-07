@@ -1,16 +1,12 @@
-import React, { useState, useEffect, useRef } from './react';
+import { useEffect, useRef, useState } from 'react';
+import { FilterBar, Legend, Toolbar, TooltipPanel, extractMessageInfo } from '@rxjs-devtools/panel-ui';
 import { MarblePanelRuntime, MAX_AUTO_LANES } from './runtime/MarblePanelRuntime';
 import type { FilterOptions, TooltipState } from './types';
-import { extractMessageInfo } from './utils';
 import {
   ROOT_STYLE,
   STAGE_STYLE,
   CANVAS_STAGE_STYLE,
 } from './styles';
-import { Toolbar } from './components/Toolbar';
-import { FilterBar } from './components/FilterBar';
-import { TooltipPanel } from './components/TooltipPanel';
-import { Legend } from './components/Legend';
 
 export function PanelApp() {
   const stageRef = useRef<HTMLDivElement | null>(null);

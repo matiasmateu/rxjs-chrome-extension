@@ -9,8 +9,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
-    "typecheck": "turbo run typecheck --filter=@rxjs-devtools/playground --filter=@rxjs-devtools/core --filter=@rxjs-devtools/panel-ui",
-    "typecheck:legacy": "turbo run typecheck --filter=@rxjs-devtools/extension",
+    "typecheck": "turbo run typecheck",
+    "typecheck:extension": "turbo run typecheck --filter=@rxjs-devtools/extension",
+    "typecheck:legacy": "npm run typecheck:extension",
     "typecheck:all": "turbo run typecheck",
     "lint": "turbo run lint",
     "clean": "turbo run clean",
