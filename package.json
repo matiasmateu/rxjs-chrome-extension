@@ -1,0 +1,25 @@
+{
+  "name": "@rxjs-devtools/workspace",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "typecheck": "turbo run typecheck",
+    "typecheck:extension": "turbo run typecheck --filter=@rxjs-devtools/extension",
+    "typecheck:legacy": "npm run typecheck:extension",
+    "typecheck:all": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean",
+    "build:extension": "npm run build --workspace @rxjs-devtools/extension",
+    "dev:extension": "npm run dev --workspace @rxjs-devtools/extension",
+    "dev:playground": "npm run dev --workspace @rxjs-devtools/playground"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.14"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@rxjs-devtools/extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist && node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint not configured for extension'",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@rxjs-devtools/core": "workspace:*",
+    "@rxjs-devtools/panel-ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.5"
+  }
+}
