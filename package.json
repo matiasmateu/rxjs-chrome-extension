@@ -1,14 +1,24 @@
 {
-  "name": "rxjs-chrome-extension",
+  "name": "@rxjs-devtools/workspace",
   "private": true,
-  "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "build": "node esbuild.config.mjs",
-    "watch": "node esbuild.config.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "typecheck": "turbo run typecheck --filter=@rxjs-devtools/playground --filter=@rxjs-devtools/core --filter=@rxjs-devtools/panel-ui",
+    "typecheck:legacy": "turbo run typecheck --filter=@rxjs-devtools/extension",
+    "typecheck:all": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean",
+    "build:extension": "npm run build --workspace @rxjs-devtools/extension",
+    "dev:extension": "npm run dev --workspace @rxjs-devtools/extension",
+    "dev:playground": "npm run dev --workspace @rxjs-devtools/playground"
   },
   "devDependencies": {
-    "esbuild": "^0.21.5",
-    "typescript": "^5.4.5"
+    "turbo": "^2.0.14"
   }
 }

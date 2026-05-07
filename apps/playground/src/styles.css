@@ -1,0 +1,83 @@
+:root {
+  color-scheme: dark;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: #0b1220;
+  color: #dbe7ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(35, 132, 255, 0.18), transparent 40%),
+    radial-gradient(circle at 95% 100%, rgba(56, 189, 248, 0.15), transparent 45%),
+    #0b1220;
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2.4rem 1.2rem 3rem;
+}
+
+h1 {
+  margin: 0 0 0.2rem;
+  font-size: clamp(1.5rem, 2.5vw, 2.2rem);
+}
+
+.summary,
+.hint {
+  color: #9fb2d9;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+  margin: 1.2rem 0;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  border: 1px solid #31466e;
+  border-radius: 0.6rem;
+  background: #111a2e;
+  color: #dbe7ff;
+  padding: 0.45rem 0.55rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+button {
+  border: 1px solid #3a5488;
+  border-radius: 0.6rem;
+  background: #172542;
+  color: #dbe7ff;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1e3055;
+}
