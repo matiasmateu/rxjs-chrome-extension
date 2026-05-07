@@ -13,6 +13,10 @@ importers:
         version: 2.9.9
 
   apps/extension:
+    dependencies:
+      '@rxjs-devtools/core':
+        specifier: workspace:*
+        version: link:../../packages/core
     devDependencies:
       esbuild:
         specifier: ^0.21.5

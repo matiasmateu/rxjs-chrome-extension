@@ -1,3 +1,4 @@
+import { isRxDevtoolsEvent, type RxDevtoolsMessage } from '@rxjs-devtools/core/protocol';
 import type { FilterTags, MessageInfo } from './types';
 
 export function hashColor(str: string): string {
@@ -79,17 +80,8 @@ export function sanitizeLaneKeyPart(value: unknown): string {
   return str.replace(/\//g, '_');
 }
 
-export function isRxDevtoolsMessage(value: any): boolean {
-  return (
-    value &&
-    typeof value === 'object' &&
-    typeof value.kind === 'string' &&
-    typeof value.observableId === 'string' &&
-    typeof value.instanceId === 'string' &&
-    typeof value.subscriptionId === 'string' &&
-    typeof value.ts === 'number' &&
-    Number.isFinite(value.ts)
-  );
+export function isRxDevtoolsMessage(value: unknown): value is RxDevtoolsMessage {
+  return isRxDevtoolsEvent(value);
 }
 
 export function extractFilterTags(message: any): FilterTags {

@@ -1,552 +1,14 @@
-import type { FilterOptions, FilterTags, TooltipState } from '../types';
-import {
-  drawRxKindGlyph,
-  extractFilterTags,
-  fmtTime,
-  firstString,
-  hashColor,
-  isRxDevtoolsMessage,
-  normalizeRxKind,
-  pickFirstNumber,
-  sanitizeLaneKeyPart,
-  truncate,
-} from '../utils';
+import type { TooltipState } from '../types';
+import { drawRxKindGlyph, extractFilterTags, fmtTime, hashColor, truncate } from '../utils';
+import { DISABLED_LANE_STROKE, DISABLED_MARBLE_COLOR, HOVER_ICON_COLOR, MAX_AUTO_LANES as DEFAULT_MAX_AUTO_LANES, NOW_MARKER_OFFSET, PX_PER_SEC, SELECTED_GLOW_COLOR, SELECTED_RING_COLOR, ZOOM_IN_FACTOR, ZOOM_MAX, ZOOM_MIN, ZOOM_OUT_FACTOR } from './constants';
+import { FilterRegistry } from './FilterRegistry';
+import { LaneActivity } from './LaneActivity';
+import { LaneLayout } from './LaneLayout';
+import { normalizeContentEvent as normalizeContentEventPayload } from './normalizeContentEvent';
+import { PanelTransport } from './PanelTransport';
+import type { Marble, RuntimeOptions } from './runtime-types';
 
-const PX_PER_SEC = 120;
-const NOW_MARKER_OFFSET = 80;
-export const MAX_AUTO_LANES = 128;
-const LANE_STROKE_COLOR = '#213145';
-const DISABLED_LANE_STROKE = '#4b5563';
-const DISABLED_MARBLE_COLOR = '#6b7280';
-const LANE_PAD = 24;
-const LANE_MIN_STEP = 40;
-const LANE_GROUP_GAP = 0.7;
-const LANE_GROUP_LABEL_COLOR = '#8fb1d9';
-const LANE_GROUP_LABEL_FONT = '12px ui-sans-serif, system-ui';
-const LANE_GROUP_SEPARATOR = '#2a3b52';
-const SELECTED_RING_COLOR = 'rgba(147, 197, 253, 0.9)';
-const SELECTED_GLOW_COLOR = 'rgba(59, 130, 246, 0.6)';
-const HOVER_ICON_COLOR = '#dbeafe';
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 50;
-const ZOOM_IN_FACTOR = 1.1;
-const ZOOM_OUT_FACTOR = 0.9;
-
-type RefObject<T> = { current: T | null };
-
-type RuntimeOptions = {
-  canvasRef: RefObject<HTMLCanvasElement>;
-  stageRef: RefObject<HTMLDivElement>;
-  setStatsText: (text: string) => void;
-  setTooltipState: (state: TooltipState) => void;
-  setPinnedId: (id: number | null) => void;
-  notifyRunningChange: (running: boolean) => void;
-  syncLaneCount?: (lanes: number) => void;
-  initialLanes: number;
-  initialFilter: string;
-  initialDomainFilter: string;
-  initialRunning: boolean;
-  setFilterOptions?: (options: FilterOptions) => void;
-  maxAutoLanes?: number;
-};
-
-type DomainInfo = {
-  actions: Map<string, number>;
-  baseOffset: number;
-  metadata: Map<string, { tags: string[]; label: string }>;
-};
-
-type LaneStatus = {
-  activeCount: number;
-  disabled: boolean;
-};
-
-type SubscriptionState = {
-  laneKey: string;
-  active: boolean;
-};
-
-type Marble = {
-  id: number;
-  timeMs: number;
-  r: number;
-  color: string;
-  msg: any;
-  laneKey: string;
-  lane: number;
-  filters: FilterTags;
-};
-
-type GroupBoundary = {
-  key: string;
-  start: number;
-  end: number;
-  size: number;
-};
-
-class FilterRegistry {
-  filterText: string;
-  filterDomain: string;
-  filterDomains: Map<string, string>;
-  notifyFilterOptions: ((options: FilterOptions) => void) | null;
-
-  constructor(
-    initialText: string,
-    initialDomain: string,
-    notifyFilterOptions?: (options: FilterOptions) => void,
-  ) {
-    this.filterText = (initialText || '').trim().toLowerCase();
-    this.filterDomain = (initialDomain || '').toLowerCase();
-    this.filterDomains = new Map();
-    this.notifyFilterOptions = notifyFilterOptions || null;
-  }
-
-  setText = (value: string) => {
-    this.filterText = (value || '').trim().toLowerCase();
-  };
-
-  setDomain = (value: string) => {
-    this.filterDomain = (value || '').toLowerCase();
-  };
-
-  matches = (label: string, tags: FilterTags | null) => {
-    const matchesText = !this.filterText || label.toLowerCase().includes(this.filterText);
-    const matchesDomain =
-      !this.filterDomain || (tags?.domainKey && tags.domainKey === this.filterDomain);
-    return matchesText && matchesDomain;
-  };
-
-  ingest = (tags: FilterTags | null) => {
-    if (!tags) return;
-    let changed = false;
-
-    if (tags.domainKey) {
-      const label = tags.domainLabel || tags.domainKey;
-      if (!this.filterDomains.has(tags.domainKey)) {
-        this.filterDomains.set(tags.domainKey, label);
-        changed = true;
-      }
-    }
-
-    if (changed && this.notifyFilterOptions) {
-      const domains = Array.from(this.filterDomains.entries()).map(([value, label]) => ({
-        value,
-        label: label || value,
-      }));
-
-      domains.sort((a, b) => a.label.localeCompare(b.label));
-
-      this.notifyFilterOptions({ domains });
-    }
-  };
-
-  clear = () => {
-    this.filterDomains.clear();
-    if (this.notifyFilterOptions) {
-      this.notifyFilterOptions({ domains: [] });
-    }
-  };
-}
-
-class LaneActivity {
-  laneStatus: Map<string, LaneStatus> = new Map();
-  subscriptionState: Map<string, SubscriptionState> = new Map();
-
-  update = (laneKey: string, kind?: string, subscriptionId?: string) => {
-    if (!laneKey) return;
-    const rxKind = normalizeRxKind(kind);
-    if (!rxKind) return;
-    const subscriptionKey = subscriptionId ? `${laneKey}::${subscriptionId}` : null;
-
-    if (rxKind === 'subscribe' || rxKind === 'create') {
-      const state = this.laneStatus.get(laneKey) || { activeCount: 0, disabled: false };
-      if (subscriptionKey) {
-        const existing = this.subscriptionState.get(subscriptionKey);
-        if (!existing || !existing.active) {
-          this.subscriptionState.set(subscriptionKey, { laneKey, active: true });
-          state.activeCount += 1;
-        }
-      } else {
-        state.activeCount += 1;
-      }
-      state.disabled = false;
-      this.laneStatus.set(laneKey, state);
-      return;
-    }
-
-    const isTerminal = rxKind === 'complete' || rxKind === 'error' || rxKind === 'unsubscribe';
-    if (!isTerminal) return;
-
-    const sub = subscriptionKey ? this.subscriptionState.get(subscriptionKey) : null;
-    const targetLaneKey = sub?.laneKey || laneKey;
-    const state = this.laneStatus.get(targetLaneKey) || { activeCount: 0, disabled: false };
-
-    if (subscriptionKey && sub) {
-      if (sub.active) {
-        state.activeCount = Math.max(0, state.activeCount - 1);
-      }
-      this.subscriptionState.delete(subscriptionKey);
-    } else if (!subscriptionKey || rxKind !== 'unsubscribe') {
-      state.activeCount = Math.max(0, state.activeCount - 1);
-    }
-
-    if (state.activeCount === 0) {
-      state.disabled = true;
-    }
-
-    this.laneStatus.set(targetLaneKey, state);
-  };
-
-  isLaneDisabled = (laneKey: string) => {
-    if (!laneKey) return false;
-    const state = this.laneStatus.get(laneKey);
-    return Boolean(state && state.disabled && state.activeCount <= 0);
-  };
-
-  isLaneDisabledForIndex = (laneIndex: number, laneIndexMap: Array<Set<string>>) => {
-    const entries = laneIndexMap[laneIndex];
-    if (!entries || entries.size === 0) return false;
-    let hasState = false;
-    for (const key of entries) {
-      const state = this.laneStatus.get(key);
-      if (!state) continue;
-      hasState = true;
-      if (state.activeCount > 0) return false;
-      if (!state.disabled) return false;
-    }
-    return hasState;
-  };
-
-  clear = () => {
-    this.laneStatus.clear();
-    this.subscriptionState.clear();
-  };
-}
-
-class LaneLayout {
-  lanes: number;
-  maxAutoLanes: number;
-  syncLaneCount?: (lanes: number) => void;
-
-  domainOrder: string[];
-  domainMap: Map<string, DomainInfo>;
-  laneIndexMap: Array<Set<string>>;
-  groupBoundaries: GroupBoundary[];
-  groupIndexByLane: number[];
-  groupLabels: Map<string, string>;
-
-  constructor(initialLanes: number, maxAutoLanes: number, syncLaneCount?: (lanes: number) => void) {
-    this.lanes = initialLanes;
-    this.maxAutoLanes = Math.max(1, maxAutoLanes);
-    this.syncLaneCount = syncLaneCount;
-
-    this.domainOrder = [];
-    this.domainMap = new Map();
-    this.laneIndexMap = [];
-    this.groupBoundaries = [];
-    this.groupIndexByLane = [];
-    this.groupLabels = new Map();
-  }
-
-  setLanes = (value: number) => {
-    const next = Math.max(1, value);
-    this.lanes = next;
-    if (this.syncLaneCount && next !== value) {
-      this.syncLaneCount(next);
-    }
-    this.rebuildLaneIndexMap();
-  };
-
-  coerceLaneIndex = (index: number) => {
-    if (!Number.isFinite(index) || index < 0) return 0;
-    return Math.floor(index);
-  };
-
-  extractLaneParts = (rawKey: string) => {
-    const key = rawKey ? String(rawKey) : 'default';
-    const slashIdx = key.indexOf('/');
-    const domain = slashIdx > 0 ? key.slice(0, slashIdx) : key;
-    const normalizedDomain = domain || 'default';
-    return { key, domain: normalizedDomain };
-  };
-
-  registerGroupLabel = (laneKey: string, msg: any) => {
-    const { key, domain } = this.extractLaneParts(laneKey);
-    if (!domain) return;
-    const existing = this.groupLabels.get(domain);
-    if (existing && existing !== domain) return;
-    const label = firstString(msg?.observableId, msg?.label, msg?.instanceId, domain);
-    if (label) {
-      this.groupLabels.set(domain, label);
-    }
-    
-    // Store tags and label metadata for sorting
-    // Always update metadata to ensure we have the latest tags
-    const info = this.domainMap.get(domain);
-    if (info) {
-      const tags = msg?.source?.tags || [];
-      info.metadata.set(key, { tags: Array.isArray(tags) ? tags : [], label: label || key });
-    }
-  };
-
-  resolveLaneKey = (rawKey: string, marbles: Marble[], msg?: any) => {
-    return this.coerceLaneIndex(this.getLaneIndexForKey(rawKey, true, marbles, msg));
-  };
-
-  getLaneIndexForKey = (rawKey: string, createIfMissing: boolean, marbles: Marble[] = [], msg?: any) => {
-    const { key, domain } = this.extractLaneParts(rawKey);
-    let info = this.domainMap.get(domain);
-    let changed = false;
-
-    if (!info) {
-      if (!createIfMissing) return 0;
-      info = { actions: new Map(), baseOffset: 0, metadata: new Map() };
-      this.domainMap.set(domain, info);
-      this.domainOrder.push(domain);
-      changed = true;
-    }
-
-    // Store/update metadata if provided
-    if (msg && info) {
-      const tags = msg?.source?.tags || [];
-      const label = firstString(msg?.observableId, msg?.label, msg?.instanceId, key);
-      info.metadata.set(key, { tags: Array.isArray(tags) ? tags : [], label: label || key });
-    }
-
-    if (!info.actions.has(key)) {
-      if (!createIfMissing) return info.baseOffset;
-      // Temporarily assign a placeholder - will be updated by updateStructure
-      info.actions.set(key, this.lanes);
-      changed = true;
-    }
-
-    if (changed && createIfMissing) {
-      this.updateStructure(true, marbles);
-      info = this.domainMap.get(domain) || info;
-    }
-
-    // Actions now store absolute lane positions
-    const laneIndex = info.actions.get(key) ?? 0;
-    return laneIndex;
-  };
-
-  updateStructure = (reassign: boolean, marbles: Marble[]) => {
-    let offset = 0;
-    const boundaries: GroupBoundary[] = [];
-    const groupIndexByLane: number[] = [];
-    let groupIndex = 0;
-    
-    // Helper to extract the most specific grouping tag
-    const getGroupingTag = (tags: string[] | undefined) => {
-      if (!tags || tags.length === 0) return '';
-      // Prefer tags with hyphens (more specific like 'stream-state', 'google-cast')
-      const specificTag = tags.find(t => t.includes('-'));
-      if (specificTag) return specificTag;
-      // Otherwise use the last tag
-      return tags[tags.length - 1] || '';
-    };
-    
-    // Collect all observables from all domains with their metadata
-    const allObservables: Array<{ domain: string; key: string; meta: { tags: string[]; label: string } | undefined }> = [];
-    for (const domain of this.domainOrder) {
-      const info = this.domainMap.get(domain);
-      if (!info) continue;
-      
-      for (const [key] of info.actions.entries()) {
-        allObservables.push({
-          domain,
-          key,
-          meta: info.metadata.get(key)
-        });
-      }
-    }
-    
-    // Sort ALL observables by tag first, then label, then key
-    allObservables.sort((a, b) => {
-      const tagA = getGroupingTag(a.meta?.tags);
-      const tagB = getGroupingTag(b.meta?.tags);
-      
-      // Sort by tag first (primary criterion)
-      if (tagA !== tagB) {
-        return tagA.localeCompare(tagB);
-      }
-      
-      // Then by label
-      const labelA = a.meta?.label || a.key;
-      const labelB = b.meta?.label || b.key;
-      if (labelA !== labelB) {
-        return labelA.localeCompare(labelB);
-      }
-      
-      // Finally by key
-      return a.key.localeCompare(b.key);
-    });
-    
-    // Rebuild domain structure based on sorted order
-    // Clear all actions first and create a mapping from (domain,key) to absolute lane
-    const absoluteLaneMap = new Map<string, number>();
-    
-    for (const domain of this.domainOrder) {
-      const info = this.domainMap.get(domain);
-      if (info) {
-        info.actions.clear();
-        info.baseOffset = 0;
-      }
-    }
-    
-    // Group observables by tag instead of domain
-    let currentTag: string = '';
-    let tagGroupStart = 0;
-    const tagGroups: Array<{ tag: string; observables: typeof allObservables }> = [];
-    
-    for (let i = 0; i < allObservables.length; i++) {
-      const observable = allObservables[i];
-      const tag = getGroupingTag(observable.meta?.tags);
-      
-      if (tag !== currentTag) {
-        if (i > tagGroupStart) {
-          tagGroups.push({
-            tag: currentTag,
-            observables: allObservables.slice(tagGroupStart, i)
-          });
-        }
-        currentTag = tag;
-        tagGroupStart = i;
-      }
-    }
-    // Add the last group
-    if (tagGroupStart < allObservables.length) {
-      tagGroups.push({
-        tag: currentTag,
-        observables: allObservables.slice(tagGroupStart)
-      });
-    }
-    
-    // Assign lanes by tag groups
-    for (const tagGroup of tagGroups) {
-      const groupStartOffset = offset;
-      
-      // Within each tag group, assign absolute lanes to observables
-      for (const observable of tagGroup.observables) {
-        const { domain, key } = observable;
-        
-        // Store the absolute lane position
-        absoluteLaneMap.set(`${domain}::${key}`, offset);
-        offset += 1;
-      }
-      
-      // Create a boundary for this tag group
-      const groupSize = tagGroup.observables.length;
-      if (groupSize > 0) {
-        // Use the tag as the group key, or first observable's label
-        const groupLabel = tagGroup.tag || tagGroup.observables[0]?.meta?.label || 'group';
-        boundaries.push({
-          key: groupLabel,
-          start: groupStartOffset,
-          end: offset,
-          size: groupSize
-        });
-        
-        for (let i = groupStartOffset; i < offset; i++) {
-          groupIndexByLane[i] = groupIndex;
-        }
-        groupIndex += 1;
-      }
-    }
-    
-    // Now rebuild domain actions map to reflect absolute positioning
-    for (const observable of allObservables) {
-      const { domain, key } = observable;
-      const info = this.domainMap.get(domain);
-      if (!info) continue;
-      
-      const absoluteLane = absoluteLaneMap.get(`${domain}::${key}`);
-      if (absoluteLane !== undefined) {
-        // Store absolute lane position directly
-        info.actions.set(key, absoluteLane);
-      }
-    }
-
-    this.groupBoundaries = boundaries;
-    this.groupIndexByLane = groupIndexByLane;
-
-    const prevLanes = this.lanes;
-    const totalLanes = offset > 0 ? offset : prevLanes || 1;
-    const nextLanes = Math.max(1, totalLanes);
-    this.lanes = nextLanes;
-    if (this.syncLaneCount && nextLanes !== prevLanes) {
-      this.syncLaneCount(nextLanes);
-    }
-
-    if (reassign) {
-      this.reassignMarbleLanes(marbles);
-    }
-    this.rebuildLaneIndexMap();
-  };
-
-  rebuildLaneIndexMap = () => {
-    const totalLanes = this.groupBoundaries.length
-      ? this.groupBoundaries[this.groupBoundaries.length - 1].end
-      : 0;
-    const laneCount = Math.max(1, Math.max(this.lanes, totalLanes));
-    if (laneCount !== this.lanes) {
-      this.lanes = laneCount;
-    }
-    const nextMap = Array.from({ length: laneCount }, () => new Set<string>());
-
-    for (const domain of this.domainOrder) {
-      const info = this.domainMap.get(domain);
-      if (!info) continue;
-      for (const [key, absoluteLane] of info.actions.entries()) {
-        // Actions now store absolute lane positions, not relative offsets
-        const laneIndex = this.coerceLaneIndex(absoluteLane);
-        nextMap[laneIndex].add(key);
-      }
-    }
-
-    this.laneIndexMap = nextMap;
-  };
-
-  reassignMarbleLanes = (marbles: Marble[]) => {
-    if (!marbles.length) return;
-    for (const marble of marbles) {
-      const laneKey =
-        marble.laneKey ??
-        marble.msg?.laneKey ??
-        marble.msg?.observableId ??
-        marble.msg?.label ??
-        marble.msg?.type;
-      const laneIndex = this.getLaneIndexForKey(laneKey, false);
-      marble.lane = this.coerceLaneIndex(laneIndex);
-    }
-  };
-
-  laneMetrics = (height: number) => {
-    const pad = LANE_PAD;
-    const inner = Math.max(1, height - pad * 2);
-    const groupCount = Math.max(1, this.groupBoundaries.length || 1);
-    const virtualLanes = this.lanes + Math.max(0, groupCount - 1) * LANE_GROUP_GAP;
-    const fitStep = inner / Math.max(1, virtualLanes);
-    const step = Math.max(LANE_MIN_STEP, fitStep);
-    return { pad, step };
-  };
-
-  laneY = (lane: number, height: number) => {
-    const { pad, step } = this.laneMetrics(height);
-    const groupIndex = this.groupIndexByLane[lane] ?? 0;
-    const virtualIndex = lane + groupIndex * LANE_GROUP_GAP;
-    return pad + (virtualIndex + 0.5) * step;
-  };
-
-  clear = () => {
-    this.domainOrder.length = 0;
-    this.domainMap.clear();
-    this.laneIndexMap = [];
-    this.groupBoundaries = [];
-    this.groupIndexByLane = [];
-    this.groupLabels.clear();
-  };
-}
+export const MAX_AUTO_LANES = DEFAULT_MAX_AUTO_LANES;
 
 export class MarblePanelRuntime {
   canvas: HTMLCanvasElement | null;
@@ -584,9 +46,7 @@ export class MarblePanelRuntime {
   mouse: { x: number; y: number; down: boolean };
   dragStart: { x: number; y: number; offsetX: number; offsetY: number } | null;
 
-  connecting: boolean;
-  port: any;
-  reconnectTimer: number | null;
+  transport: PanelTransport;
   demoTimer: number | null;
 
   animationFrame: number | null;
@@ -643,9 +103,7 @@ export class MarblePanelRuntime {
   };
 
   handleUnload = () => {
-    try {
-      this.port?.disconnect();
-    } catch {}
+    this.transport.disconnect();
   };
 
   setZoom = (next: number) => {
@@ -690,15 +148,10 @@ export class MarblePanelRuntime {
 
   handlePortDisconnect = () => {
     this.pushMarble({ type: 'INFO', text: 'Port disconnected. Reconnecting…' });
-    this.connecting = false;
-    this.reconnectTimer = window.setTimeout(() => this.connect(), 500);
   };
 
   handleNavigated = () => {
-    try {
-      this.port?.postMessage({ type: 'INIT', tabId: chrome.devtools.inspectedWindow.tabId });
-      this.pushMarble({ type: 'NAVIGATED' });
-    } catch {}
+    this.pushMarble({ type: 'NAVIGATED' });
   };
 
   constructor({
@@ -750,9 +203,15 @@ export class MarblePanelRuntime {
     this.mouse = { x: 0, y: 0, down: false };
     this.dragStart = null;
 
-    this.connecting = false;
-    this.port = null;
-    this.reconnectTimer = null;
+    this.transport = new PanelTransport({
+      getInspectedTabId: () => chrome.devtools.inspectedWindow.tabId,
+      onPortMessage: this.handlePortMessage,
+      onPortDisconnected: this.handlePortDisconnect,
+      onPanelNavigated: this.handleNavigated,
+      onConnectError: (error) => console.error('Failed to connect', error),
+      reconnectDelayMs: 500,
+      autoReconnect: true,
+    });
     this.demoTimer = null;
 
     this.animationFrame = null;
@@ -803,25 +262,13 @@ export class MarblePanelRuntime {
       this.resizeObserver = null;
     }
 
-    if (this.port) {
-      try {
-        this.port.disconnect();
-      } catch {}
-    }
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.transport.disconnect();
 
     if (this.demoTimer) {
       clearInterval(this.demoTimer);
       this.demoTimer = null;
     }
 
-    if (chrome?.devtools?.network?.onNavigated && this.handleNavigated) {
-      chrome.devtools.network.onNavigated.removeListener(this.handleNavigated);
-    }
   }
 
   layout() {
@@ -1203,59 +650,7 @@ export class MarblePanelRuntime {
   }
 
   normalizeContentEvent(msg: any) {
-    if (!msg || typeof msg !== 'object') return null;
-    const data = msg.data && typeof msg.data === 'object' ? msg.data : null;
-
-    const devtoolsCandidate = data?.message ?? msg.message;
-    if (isRxDevtoolsMessage(devtoolsCandidate)) {
-      const rxKind = normalizeRxKind(devtoolsCandidate.kind);
-      const kindLabel = rxKind ? rxKind.toUpperCase() : 'EVENT';
-      const source = devtoolsCandidate.source || {};
-      const label = firstString(
-        source.label,
-        devtoolsCandidate.observableId,
-        devtoolsCandidate.instanceId,
-      );
-      const domainRaw = firstString(source.domain);
-      const domain = (domainRaw || 'unknown').toLowerCase();
-      const observableLabel =
-        devtoolsCandidate.observableId || label || devtoolsCandidate.instanceId || kindLabel;
-      const observableKey = sanitizeLaneKeyPart(
-        domain ? `${domain}:${observableLabel}` : observableLabel,
-      );
-      const subscriptionLabel =
-        devtoolsCandidate.subscriptionId || devtoolsCandidate.instanceId || 'default';
-      const subscriptionKey = sanitizeLaneKeyPart(subscriptionLabel);
-      const laneKey = `${observableKey}/${subscriptionKey}`;
-      const timestamp =
-        pickFirstNumber(
-          devtoolsCandidate.ts,
-          msg.meta?.time,
-          msg.time,
-          msg.ts,
-          msg.timestamp,
-        ) ?? Date.now();
-
-      return {
-        type: label ? `${kindLabel} • ${label}` : kindLabel,
-        kind: rxKind || 'event',
-        rxKind,
-        label,
-        domain,
-        observableId: devtoolsCandidate.observableId,
-        instanceId: devtoolsCandidate.instanceId,
-        subscriptionId: devtoolsCandidate.subscriptionId,
-        time: timestamp,
-        ts: devtoolsCandidate.ts,
-        data: devtoolsCandidate.data,
-        meta: devtoolsCandidate.meta,
-        source: devtoolsCandidate.source,
-        laneKey,
-        tabId: msg.tabId,
-        raw: { background: msg, content: data, devtools: devtoolsCandidate },
-      };
-    }
-    return null;
+    return normalizeContentEventPayload(msg);
   }
 
   renderMessage(msg: any) {
@@ -1266,30 +661,7 @@ export class MarblePanelRuntime {
   }
 
   connect() {
-    if (this.connecting) return;
-    this.connecting = true;
-
-    try {
-      this.port = chrome.runtime.connect({ name: 'rxjs-panel' });
-      this.port.onMessage.addListener(this.handlePortMessage);
-      this.port.onDisconnect.addListener(this.handlePortDisconnect);
-
-      try {
-        this.port.postMessage({
-          type: 'INIT',
-          tabId: chrome.devtools.inspectedWindow.tabId,
-        });
-      } catch {}
-
-      if (chrome?.devtools?.network?.onNavigated) {
-        chrome.devtools.network.onNavigated.removeListener(this.handleNavigated);
-        chrome.devtools.network.onNavigated.addListener(this.handleNavigated);
-      }
-    } catch (err) {
-      console.error('Failed to connect', err);
-    }
-
-    this.connecting = false;
+    this.transport.connect();
   }
 
   startDemoMode() {

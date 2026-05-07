@@ -3,8 +3,14 @@ import esbuild from 'esbuild';
 const watch = process.argv.includes('--watch');
 
 const ctx = await esbuild.context({
-  entryPoints: ['src/panel.tsx'],
-  outfile: 'dist/panel.js',
+  entryPoints: {
+    panel: 'src/panel.tsx',
+    background: 'src/entries/background.ts',
+    contentScript: 'src/entries/contentScript.ts',
+    injectedHook: 'src/entries/injectedHook.ts',
+    devtools: 'src/entries/devtools.ts',
+  },
+  outdir: 'dist',
   bundle: true,
   format: 'esm',
   target: 'es2020',
