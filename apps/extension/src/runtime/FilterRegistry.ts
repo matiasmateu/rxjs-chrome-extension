@@ -25,10 +25,9 @@ export class FilterRegistry {
     this.filterDomain = (value || '').toLowerCase();
   };
 
-  matches = (label: string, tags: FilterTags | null) => {
+  matches = (label: string, tags: FilterTags | null): boolean => {
     const matchesText = !this.filterText || label.toLowerCase().includes(this.filterText);
-    const matchesDomain =
-      !this.filterDomain || (tags?.domainKey && tags.domainKey === this.filterDomain);
+    const matchesDomain = !this.filterDomain || tags?.domainKey === this.filterDomain;
     return matchesText && matchesDomain;
   };
 

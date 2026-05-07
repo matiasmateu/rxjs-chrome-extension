@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests for playground\"",
     "lint": "eslint src --max-warnings=0 --ext .ts,.tsx",
     "clean": "rm -rf dist src/*.js vite.config.js tsconfig.tsbuildinfo"
   },

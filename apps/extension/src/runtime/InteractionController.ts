@@ -1,6 +1,5 @@
 import {
   NOW_MARKER_OFFSET,
-  PX_PER_SEC,
   ZOOM_IN_FACTOR,
   ZOOM_MAX,
   ZOOM_MIN,
@@ -100,13 +99,13 @@ export class InteractionController {
     if (nextZoom === xZoom) return;
 
     const anchor = Number.isFinite(anchorX) ? anchorX : width - NOW_MARKER_OFFSET;
-    const anchorOffset = width - NOW_MARKER_OFFSET - anchor;
-    const dtSec = (anchorOffset + worldOffsetPx) / (PX_PER_SEC * xZoom);
-    void dtSec;
+    const anchorOffsetPx = width - NOW_MARKER_OFFSET - anchor;
+    const projectedDistancePx = anchorOffsetPx + worldOffsetPx;
+    const nextWorldOffsetPx = projectedDistancePx * (nextZoom / xZoom) - anchorOffsetPx;
 
     this.options.updateViewportState({
       xZoom: nextZoom,
-      worldOffsetPx: 0,
+      worldOffsetPx: Number.isFinite(nextWorldOffsetPx) ? nextWorldOffsetPx : worldOffsetPx,
     });
   };
 

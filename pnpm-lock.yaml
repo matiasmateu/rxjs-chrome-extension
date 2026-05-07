@@ -107,6 +107,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(vite@6.4.2)
 
   packages/panel-ui:
     dependencies:
@@ -120,6 +123,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(vite@6.4.2)
 
 packages:
 

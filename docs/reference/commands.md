@@ -19,6 +19,7 @@ pnpm verify
 | ---------------------- | -------------------------------------- | ----------------------------------------------- |
 | `pnpm install`         | bootstrap deps                         | all workspace deps installed                    |
 | `pnpm dev`             | run all dev tasks in parallel          | long-running package dev tasks                  |
+| `pnpm test`            | run workspace test tasks               | package tests pass                              |
 | `pnpm format`          | apply repository formatting            | Prettier rewrites files to canonical style      |
 | `pnpm format:check`    | validate repository formatting         | fails when files are not Prettier-formatted     |
 | `pnpm verify`          | canonical pre-PR quality gate          | format check + lint + tests + typecheck + build |

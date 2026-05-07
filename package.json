@@ -9,6 +9,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
+    "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "typecheck:extension": "turbo run typecheck --filter=@rxjs-devtools/extension",
     "typecheck:legacy": "pnpm typecheck:extension",
@@ -16,7 +17,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "turbo run lint",
-    "verify": "pnpm format:check && pnpm lint && pnpm --filter @rxjs-devtools/extension test && pnpm typecheck && pnpm build",
+    "verify": "pnpm format:check && pnpm lint && pnpm test && pnpm typecheck && pnpm build",
     "clean": "turbo run clean",
     "build:extension": "pnpm --filter @rxjs-devtools/extension build",
     "dev:extension": "pnpm --filter @rxjs-devtools/extension dev",

@@ -27,6 +27,7 @@ type CanvasRenderBaseState = {
   laneLayout: LaneLayout;
   laneActivity: LaneActivity;
   marbles: Marble[];
+  laneSamplesByKey: Map<string, Marble>;
   filteredLaneMap: Map<number, number>;
 };
 
@@ -42,8 +43,15 @@ type DrawMarblesResult = {
   worldOffsetPy: number;
 };
 
+function laneHasMatchingSample(state: CanvasRenderBaseState, laneKey: string): boolean {
+  const sampleMarble = state.laneSamplesByKey.get(laneKey);
+  if (!sampleMarble) return false;
+  return state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters);
+}
+
 export function drawGrid(state: CanvasRenderBaseState) {
   const { ctx } = state;
+  const laneMetrics = state.laneLayout.laneMetrics(state.height);
 
   ctx.lineCap = 'butt';
   const gradient = ctx.createLinearGradient(0, 0, 0, state.height);
@@ -58,15 +66,10 @@ export function drawGrid(state: CanvasRenderBaseState) {
       const group = state.laneLayout.groupBoundaries[i];
       const startY = laneYForIndex(state, group.start);
       const endY = laneYForIndex(state, Math.max(group.start, group.end - 1));
-      const height = endY - startY + state.laneLayout.laneMetrics(state.height).step;
+      const height = endY - startY + laneMetrics.step;
 
       ctx.fillStyle = colors[i % 2];
-      ctx.fillRect(
-        0,
-        startY - state.laneLayout.laneMetrics(state.height).step / 2,
-        state.width,
-        height,
-      );
+      ctx.fillRect(0, startY - laneMetrics.step / 2, state.width, height);
     }
   }
 
@@ -108,11 +111,7 @@ export function drawGrid(state: CanvasRenderBaseState) {
 
         let hasMatch = false;
         for (const key of laneKeys) {
-          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
-          if (
-            sampleMarble &&
-            state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)
-          ) {
+          if (laneHasMatchingSample(state, key)) {
             hasMatch = true;
             break;
           }
@@ -132,11 +131,7 @@ export function drawGrid(state: CanvasRenderBaseState) {
 
         let hasMatchingMarble = false;
         for (const key of laneKeys) {
-          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
-          if (
-            sampleMarble &&
-            state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)
-          ) {
+          if (laneHasMatchingSample(state, key)) {
             hasMatchingMarble = true;
             break;
           }
@@ -181,12 +176,7 @@ export function drawGrid(state: CanvasRenderBaseState) {
         allObservablesInGroup.sort((a, b) => a.absoluteLane - b.absoluteLane);
 
         for (const { key, absoluteLane } of allObservablesInGroup) {
-          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
-          if (
-            state.filters.filterDomain &&
-            (!sampleMarble ||
-              !state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters))
-          ) {
+          if (state.filters.filterDomain && !laneHasMatchingSample(state, key)) {
             continue;
           }
 

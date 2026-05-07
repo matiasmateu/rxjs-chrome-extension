@@ -116,6 +116,7 @@ export class MarblePanelRuntime {
         laneLayout: this.laneLayout,
         laneActivity: this.laneActivity,
         marbles: this.marbles,
+        laneSamplesByKey: this.marbleStore.laneSamplesByKey,
         filteredLaneMap: this.filteredLaneMap,
       });
       const marbleResult = drawMarbles({
@@ -130,6 +131,7 @@ export class MarblePanelRuntime {
         laneLayout: this.laneLayout,
         laneActivity: this.laneActivity,
         marbles: this.marbles,
+        laneSamplesByKey: this.marbleStore.laneSamplesByKey,
         filteredLaneMap: this.filteredLaneMap,
         mouse: this.interactions.mouse,
         dragStart: this.interactions.dragStart,
@@ -295,7 +297,7 @@ export class MarblePanelRuntime {
 
   updateTooltipState() {
     const targetId = this.pinnedId ?? this.hoverId;
-    const marble = targetId ? this.marbles.find((m) => m.id === targetId) : null;
+    const marble = this.marbleStore.getById(targetId);
 
     if (!marble) {
       this.publishTooltip(
@@ -322,27 +324,6 @@ export class MarblePanelRuntime {
         position,
       }),
     );
-  }
-
-  publishTooltip(payload: TooltipState | null, silent = false) {
-    const normalized =
-      payload ||
-      buildTooltipState({
-        marble: null,
-        pinnedId: this.pinnedId,
-        hoverId: this.hoverId,
-      });
-
-    if (tooltipStateChanged(this.lastTooltipPayload, normalized)) {
-      this.lastTooltipPayload = normalized;
-      if (!silent) this.setTooltipState(normalized);
-    }
-  }
-
-  setPinned(id: number | null) {
-    if (this.pinnedId === id) return;
-    this.pinnedId = id;
-    this.setPinnedId(id);
   }
 
   toggleRunningFromRuntime() {
@@ -372,27 +353,67 @@ export class MarblePanelRuntime {
 
   clear() {
     this.marbleStore.clear();
-    this.setPinned(null);
+    this.clearPinnedTooltip();
     this.hoverId = null;
-    this.publishTooltip(null);
     this.laneLayout.clear();
     this.laneActivity.clear();
     this.filters.clear();
     this.laneLayout.updateStructure(false, this.marbles);
   }
 
-  normalizeContentEvent(msg: unknown): NormalizedContentEvent | null {
+  togglePinFromPanel() {
+    if (this.pinnedId != null) {
+      this.clearPinnedTooltip();
+      return;
+    }
+
+    if (this.hoverId != null) {
+      this.setPinned(this.hoverId);
+    }
+  }
+
+  closeTooltipFromPanel() {
+    this.clearPinnedTooltip();
+  }
+
+  private clearPinnedTooltip() {
+    this.setPinned(null);
+    this.publishTooltip(null);
+  }
+
+  private normalizeContentEvent(msg: unknown): NormalizedContentEvent | null {
     return normalizeContentEventPayload(msg);
   }
 
-  renderMessage(msg: unknown) {
+  private renderMessage(msg: unknown) {
     const normalized = this.normalizeContentEvent(msg);
     if (normalized) {
       this.pushMarble(normalized);
     }
   }
 
-  pushMarble(msg: RuntimeMarbleMessage) {
+  private pushMarble(msg: RuntimeMarbleMessage) {
     this.marbleStore.push(msg);
+  }
+
+  private publishTooltip(payload: TooltipState | null, silent = false) {
+    const normalized =
+      payload ||
+      buildTooltipState({
+        marble: null,
+        pinnedId: this.pinnedId,
+        hoverId: this.hoverId,
+      });
+
+    if (tooltipStateChanged(this.lastTooltipPayload, normalized)) {
+      this.lastTooltipPayload = normalized;
+      if (!silent) this.setTooltipState(normalized);
+    }
+  }
+
+  private setPinned(id: number | null) {
+    if (this.pinnedId === id) return;
+    this.pinnedId = id;
+    this.setPinnedId(id);
   }
 }

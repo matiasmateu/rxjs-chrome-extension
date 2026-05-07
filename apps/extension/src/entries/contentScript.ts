@@ -2,6 +2,7 @@ import type { RuntimeContentForwardMessage } from '../transport-types';
 import { parsePageHookForwardMessage } from '../transport-parser';
 
 const RETRY_DELAY_MS = 200;
+const MAX_QUEUE_SIZE = 500;
 
 // Inject the page-world hook.
 (() => {
@@ -45,6 +46,9 @@ function flushQueue() {
 
 function forwardToBackground(payload: RuntimeContentForwardMessage) {
   queue.push(payload);
+  if (queue.length > MAX_QUEUE_SIZE) {
+    queue.splice(0, queue.length - MAX_QUEUE_SIZE);
+  }
   flushQueue();
 }
 

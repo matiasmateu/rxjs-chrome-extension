@@ -16,6 +16,8 @@ export class MarbleStore {
   marbles: Marble[];
   nextId: number;
   totalEvents: number;
+  laneSamplesByKey: Map<string, Marble>;
+  private marblesById: Map<number, Marble>;
   private readonly options: MarbleStoreOptions;
 
   constructor(options: MarbleStoreOptions) {
@@ -23,12 +25,21 @@ export class MarbleStore {
     this.marbles = [];
     this.nextId = 1;
     this.totalEvents = 0;
+    this.laneSamplesByKey = new Map();
+    this.marblesById = new Map();
   }
 
   clear() {
     this.marbles.length = 0;
     this.totalEvents = 0;
+    this.laneSamplesByKey.clear();
+    this.marblesById.clear();
     this.publishStats();
+  }
+
+  getById(id: number | null | undefined): Marble | null {
+    if (id == null) return null;
+    return this.marblesById.get(id) ?? null;
   }
 
   push(msg: RuntimeMarbleMessage) {
@@ -71,6 +82,10 @@ export class MarbleStore {
       filters,
     };
     this.marbles.push(marble);
+    this.marblesById.set(marble.id, marble);
+    if (!this.laneSamplesByKey.has(laneKey)) {
+      this.laneSamplesByKey.set(laneKey, marble);
+    }
     this.options.filters.ingest(filters);
     this.totalEvents++;
     this.publishStats();

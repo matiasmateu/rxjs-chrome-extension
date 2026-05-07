@@ -6,19 +6,28 @@ import {
   TooltipPanel,
   extractMessageInfo,
 } from '@rxjs-devtools/panel-ui';
-import { MarblePanelRuntime, MAX_AUTO_LANES } from './runtime/MarblePanelRuntime';
+import {
+  createPanelRuntime,
+  MAX_AUTO_LANES,
+  type PanelRuntimeFacade,
+} from './runtime/PanelRuntimeFacade';
 import type { FilterOptions, TooltipState } from './types';
 import { ROOT_STYLE, STAGE_STYLE, CANVAS_STAGE_STYLE } from './styles';
+
+const INITIAL_RUNNING = true;
+const INITIAL_FILTER_TEXT = '';
+const INITIAL_FILTER_DOMAIN = '';
+const INITIAL_LANES = 4;
 
 export function PanelApp() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const runtimeRef = useRef<MarblePanelRuntime | null>(null);
+  const runtimeRef = useRef<PanelRuntimeFacade | null>(null);
   const copyTimerRef = useRef<number | null>(null);
 
-  const [running, setRunning] = useState(true);
-  const [filterText, setFilterText] = useState('');
-  const [filterDomain, setFilterDomain] = useState('');
+  const [running, setRunning] = useState(INITIAL_RUNNING);
+  const [filterText, setFilterText] = useState(INITIAL_FILTER_TEXT);
+  const [filterDomain, setFilterDomain] = useState(INITIAL_FILTER_DOMAIN);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ domains: [] });
   const [statsText, setStatsText] = useState('0 events');
   const [tooltipState, setTooltipState] = useState<TooltipState>({
@@ -28,20 +37,18 @@ export function PanelApp() {
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [copyLabel, setCopyLabel] = useState('Copy');
 
-  // Runtime is created once and synchronized through dedicated effects below.
-  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
-    const runtime = new MarblePanelRuntime({
+    const runtime = createPanelRuntime({
       canvasRef,
       stageRef,
       setStatsText,
       setTooltipState,
       setPinnedId,
       notifyRunningChange: (value) => setRunning(value),
-      initialLanes: 4,
-      initialFilter: filterText,
-      initialDomainFilter: filterDomain,
-      initialRunning: running,
+      initialLanes: INITIAL_LANES,
+      initialFilter: INITIAL_FILTER_TEXT,
+      initialDomainFilter: INITIAL_FILTER_DOMAIN,
+      initialRunning: INITIAL_RUNNING,
       setFilterOptions,
       maxAutoLanes: MAX_AUTO_LANES,
     });
@@ -52,10 +59,9 @@ export function PanelApp() {
       runtimeRef.current = null;
     };
   }, []);
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
-    runtimeRef.current?.setRunningFromReact(running);
+    runtimeRef.current?.setRunning(running);
   }, [running]);
 
   useEffect(() => {
@@ -123,18 +129,12 @@ export function PanelApp() {
 
   const handlePin = () => {
     if (!runtimeRef.current) return;
-    if (pinnedId != null) {
-      runtimeRef.current.setPinned(null);
-      runtimeRef.current.publishTooltip(null);
-    } else if (tooltipState.canPin && runtimeRef.current.hoverId) {
-      runtimeRef.current.setPinned(runtimeRef.current.hoverId);
-    }
+    runtimeRef.current.togglePin();
   };
 
   const handleClose = () => {
     if (!runtimeRef.current) return;
-    runtimeRef.current.setPinned(null);
-    runtimeRef.current.publishTooltip(null);
+    runtimeRef.current.closeTooltip();
   };
 
   const handleSelectDomain = (value: string) => {

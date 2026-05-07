@@ -1,7 +1,29 @@
 import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/protocol';
+import { safeSerialize } from '@rxjs-devtools/core/monitor-rx';
 
 (() => {
-  const DEBUG = true;
+  const DEBUG_FLAG_KEY = '__RXJS_DEVTOOLS_DEBUG__';
+  const DEBUG_STORAGE_KEY = 'rxjs-devtools:debug';
+
+  const readDebugFlag = (): boolean => {
+    try {
+      const globalDebugValue = (window as unknown as Record<string, unknown>)[DEBUG_FLAG_KEY];
+      if (typeof globalDebugValue === 'boolean') {
+        return globalDebugValue;
+      }
+    } catch {
+      // no-op
+    }
+
+    try {
+      const persisted = window.localStorage?.getItem(DEBUG_STORAGE_KEY);
+      return persisted === '1' || persisted === 'true';
+    } catch {
+      return false;
+    }
+  };
+
+  const DEBUG = readDebugFlag();
 
   type RegisterOptions = {
     key?: string;
@@ -68,42 +90,12 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     return next;
   };
 
-  function safeSerialize(value: unknown, depth = 5, seen = new WeakSet<object>()): unknown {
-    if (value == null) return value;
-
-    const valueType = typeof value;
-    if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') return value;
-    if (valueType === 'bigint') return value.toString();
-    if (valueType === 'function') {
-      const fn = value as (...args: unknown[]) => unknown;
-      return `[Function ${fn.name || 'anonymous'}]`;
-    }
-    if (valueType === 'symbol') return String(value);
-    if (depth <= 0) return '[MaxDepth]';
-
-    if (value instanceof Date) return value.toISOString();
-    if (value instanceof Error) {
-      return { name: value.name, message: value.message, stack: value.stack };
-    }
-
-    if (typeof value === 'object') {
-      if (seen.has(value)) return '[Circular]';
-      seen.add(value);
-
-      if (Array.isArray(value)) {
-        return value.slice(0, 50).map((item) => safeSerialize(item, depth - 1, seen));
-      }
-
-      const out: Record<string, unknown> = {};
-      const keys = Object.keys(value as Record<string, unknown>).slice(0, 50);
-      for (const key of keys) {
-        out[key] = safeSerialize((value as Record<string, unknown>)[key], depth - 1, seen);
-      }
-      return out;
-    }
-
-    return String(value);
-  }
+  const serializeForHook = (value: unknown): unknown =>
+    safeSerialize(value, {
+      maxDepth: 5,
+      maxKeys: 50,
+      maxString: 20_000,
+    });
 
   function send(message: RxDevtoolsMessage) {
     try {
@@ -156,7 +148,7 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
           kind: 'next',
           ts: Date.now(),
           ...base,
-          data: safeSerialize(notification.value),
+          data: serializeForHook(notification.value),
         });
         dbg('Notification', { label: sourceLabel, kind: 'next', dt: performance.now() - start });
         return;
@@ -167,7 +159,7 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
           kind: 'error',
           ts: Date.now(),
           ...base,
-          data: safeSerialize(notification.error),
+          data: serializeForHook(notification.error),
         });
         dbg('Notification', { label: sourceLabel, kind: 'error', dt: performance.now() - start });
         return;
