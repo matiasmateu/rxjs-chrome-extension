@@ -18,7 +18,7 @@ function prettifyDomain(domain?: string): string {
   return domain
     .split(/[-_]/)
     .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 }
 
@@ -28,7 +28,9 @@ function prettifyDomain(domain?: string): string {
  * @param message Runtime marble message candidate.
  * @returns Normalized domain key/label pair.
  */
-export function extractFilterTags(message: Partial<RuntimeMarbleMessage> | null | undefined): FilterTags {
+export function extractFilterTags(
+  message: Partial<RuntimeMarbleMessage> | null | undefined,
+): FilterTags {
   const domainRaw = normalizeTypeLabel(firstString(message?.source?.domain, message?.domain));
   const domainKey = (domainRaw || 'unknown').toLowerCase();
 

@@ -40,12 +40,7 @@ type ChromeTabs = {
 
 type ChromeDevtools = {
   panels: {
-    create: (
-      title: string,
-      iconPath: string,
-      pagePath: string,
-      callback: () => void,
-    ) => void;
+    create: (title: string, iconPath: string, pagePath: string, callback: () => void) => void;
   };
   network: {
     onNavigated: ChromeEvent<(url: string) => void>;

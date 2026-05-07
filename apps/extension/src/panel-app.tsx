@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { FilterBar, Legend, Toolbar, TooltipPanel, extractMessageInfo } from '@rxjs-devtools/panel-ui';
+import {
+  FilterBar,
+  Legend,
+  Toolbar,
+  TooltipPanel,
+  extractMessageInfo,
+} from '@rxjs-devtools/panel-ui';
 import { MarblePanelRuntime, MAX_AUTO_LANES } from './runtime/MarblePanelRuntime';
 import type { FilterOptions, TooltipState } from './types';
-import {
-  ROOT_STYLE,
-  STAGE_STYLE,
-  CANVAS_STAGE_STYLE,
-} from './styles';
+import { ROOT_STYLE, STAGE_STYLE, CANVAS_STAGE_STYLE } from './styles';
 
 export function PanelApp() {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -26,6 +28,8 @@ export function PanelApp() {
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [copyLabel, setCopyLabel] = useState('Copy');
 
+  // Runtime is created once and synchronized through dedicated effects below.
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const runtime = new MarblePanelRuntime({
       canvasRef,
@@ -48,6 +52,7 @@ export function PanelApp() {
       runtimeRef.current = null;
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     runtimeRef.current?.setRunningFromReact(running);

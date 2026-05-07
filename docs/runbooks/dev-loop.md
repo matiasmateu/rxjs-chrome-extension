@@ -5,9 +5,7 @@
 Most common loop:
 
 ```bash
-pnpm --filter @rxjs-devtools/extension test
-pnpm typecheck
-pnpm build
+pnpm verify
 ```
 
 ## When to use
@@ -35,9 +33,7 @@ pnpm build:extension
 5. Run quality gate:
 
 ```bash
-pnpm --filter @rxjs-devtools/extension test
-pnpm typecheck
-pnpm build
+pnpm verify
 ```
 
 ## Loop B: Protocol / Event Contract Change
@@ -52,9 +48,7 @@ pnpm build
 4. Run full checks:
 
 ```bash
-pnpm --filter @rxjs-devtools/extension test
-pnpm typecheck
-pnpm build
+pnpm verify
 ```
 
 ## Definition Of Done Checklist
@@ -70,9 +64,7 @@ pnpm build
 Use this exact command block:
 
 ```bash
-pnpm --filter @rxjs-devtools/extension test
-pnpm typecheck
-pnpm build
+pnpm verify
 ```
 
 Optional:

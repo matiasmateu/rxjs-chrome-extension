@@ -67,9 +67,7 @@ export function TooltipPanel({
             <div style={TIP_CONTENT_STYLE}>
               <div style={TIP_ROW_STYLE}>
                 <span style={TIP_LABEL_STYLE}>Domain:</span>
-                <span style={TIP_PILL_STYLE}>
-                  {messageInfo?.domainLabel || 'Unknown domain'}
-                </span>
+                <span style={TIP_PILL_STYLE}>{messageInfo?.domainLabel || 'Unknown domain'}</span>
               </div>
               <div style={TIP_ROW_STYLE}>
                 <span style={TIP_LABEL_STYLE}>Label:</span>

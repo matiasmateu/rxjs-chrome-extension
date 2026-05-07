@@ -108,8 +108,11 @@ export function drawGrid(state: CanvasRenderBaseState) {
 
         let hasMatch = false;
         for (const key of laneKeys) {
-          const sampleMarble = state.marbles.find(m => m.laneKey === key);
-          if (sampleMarble && state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
+          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
+          if (
+            sampleMarble &&
+            state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)
+          ) {
             hasMatch = true;
             break;
           }
@@ -129,8 +132,11 @@ export function drawGrid(state: CanvasRenderBaseState) {
 
         let hasMatchingMarble = false;
         for (const key of laneKeys) {
-          const sampleMarble = state.marbles.find(m => m.laneKey === key);
-          if (sampleMarble && state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)) {
+          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
+          if (
+            sampleMarble &&
+            state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters)
+          ) {
             hasMatchingMarble = true;
             break;
           }
@@ -158,7 +164,8 @@ export function drawGrid(state: CanvasRenderBaseState) {
         ctx.fillStyle = isDisabled ? '#6b7280' : '#94a3b8';
         ctx.fillText(truncate(label, 35), 8, displayY - 2);
       } else {
-        const allObservablesInGroup: Array<{ domain: string; key: string; absoluteLane: number }> = [];
+        const allObservablesInGroup: Array<{ domain: string; key: string; absoluteLane: number }> =
+          [];
 
         for (const domain of state.laneLayout.domainOrder) {
           const info = state.laneLayout.domainMap.get(domain);
@@ -174,10 +181,11 @@ export function drawGrid(state: CanvasRenderBaseState) {
         allObservablesInGroup.sort((a, b) => a.absoluteLane - b.absoluteLane);
 
         for (const { key, absoluteLane } of allObservablesInGroup) {
-          const sampleMarble = state.marbles.find(m => m.laneKey === key);
+          const sampleMarble = state.marbles.find((m) => m.laneKey === key);
           if (
             state.filters.filterDomain &&
-            (!sampleMarble || !state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters))
+            (!sampleMarble ||
+              !state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters))
           ) {
             continue;
           }
@@ -198,7 +206,9 @@ export function drawGrid(state: CanvasRenderBaseState) {
           ctx.lineTo(state.width, displayY);
           ctx.stroke();
 
-          const info = state.laneLayout.domainMap.get(state.laneLayout.extractLaneParts(key).domain);
+          const info = state.laneLayout.domainMap.get(
+            state.laneLayout.extractLaneParts(key).domain,
+          );
           const metadata = info?.metadata.get(key);
           const label = metadata?.label || key.split('/').pop() || key;
 

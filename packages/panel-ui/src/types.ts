@@ -1,5 +1,7 @@
 export type TooltipPosition = { x: number; y: number };
 
+export type TooltipMessage = Record<string, unknown>;
+
 export type TooltipState = {
   visible: boolean;
   position: TooltipPosition;
@@ -7,7 +9,7 @@ export type TooltipState = {
   pinned?: boolean;
   canPin?: boolean;
   title?: string;
-  message?: any;
+  message?: TooltipMessage | null;
 };
 
 export type FilterOption = {
@@ -29,7 +31,7 @@ export type MessageInfo = {
   subscriptionId: string;
   tags: string[];
   timeLabel: string;
-  dataPayload: any;
+  dataPayload: unknown;
 };
 
 export type ToolbarProps = {

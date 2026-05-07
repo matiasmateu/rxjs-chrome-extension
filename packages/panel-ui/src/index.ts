@@ -3,13 +3,20 @@ export { FilterBar } from './FilterBar';
 export { TooltipPanel } from './TooltipPanel';
 export { Legend } from './Legend';
 export { extractMessageInfo } from './messageInfo';
-export { fmtTime, firstString, normalizeTimestampMs, normalizeTypeLabel, prettifyDomain } from './formatters';
+export {
+  fmtTime,
+  firstString,
+  normalizeTimestampMs,
+  normalizeTypeLabel,
+  prettifyDomain,
+} from './formatters';
 export type {
   FilterBarProps,
   FilterOption,
   FilterOptions,
   MessageInfo,
   ToolbarProps,
+  TooltipMessage,
   TooltipPanelProps,
   TooltipPosition,
   TooltipState,

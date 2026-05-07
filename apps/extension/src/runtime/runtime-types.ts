@@ -1,9 +1,6 @@
 import type { RxDevtoolsMessage, RxDevtoolsSource } from '@rxjs-devtools/core/protocol';
 import type { FilterOptions, FilterTags, TooltipState } from '../types';
-import type {
-  RuntimeBackgroundPayload,
-  RuntimeContentPayload,
-} from '../transport-types';
+import type { RuntimeBackgroundPayload, RuntimeContentPayload } from '../transport-types';
 
 export type RefObject<T> = { current: T | null };
 

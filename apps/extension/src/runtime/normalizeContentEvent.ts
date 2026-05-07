@@ -3,9 +3,7 @@ import { normalizeRxKind } from './RxKind';
 import { firstString, sanitizeLaneKeyPart } from './StringUtils';
 import type { RuntimeBackgroundPayload, RuntimeContentPayload } from '../transport-types';
 import { decodeRuntimeTransportMessage } from '../transport-parser';
-import type {
-  NormalizedContentEvent,
-} from './runtime-types';
+import type { NormalizedContentEvent } from './runtime-types';
 
 /**
  * Converts a raw transport payload into a normalized runtime event used by the panel.
@@ -25,13 +23,20 @@ export function normalizeContentEvent(input: unknown): NormalizedContentEvent | 
   const rxKind = normalizeRxKind(devtoolsCandidate.kind);
   const kindLabel = rxKind ? rxKind.toUpperCase() : 'EVENT';
   const source = devtoolsCandidate.source || {};
-  const label = firstString(source.label, devtoolsCandidate.observableId, devtoolsCandidate.instanceId);
+  const label = firstString(
+    source.label,
+    devtoolsCandidate.observableId,
+    devtoolsCandidate.instanceId,
+  );
   const domainRaw = firstString(source.domain);
   const domain = (domainRaw || 'unknown').toLowerCase();
   const observableLabel =
     devtoolsCandidate.observableId || label || devtoolsCandidate.instanceId || kindLabel;
-  const observableKey = sanitizeLaneKeyPart(domain ? `${domain}:${observableLabel}` : observableLabel);
-  const subscriptionLabel = devtoolsCandidate.subscriptionId || devtoolsCandidate.instanceId || 'default';
+  const observableKey = sanitizeLaneKeyPart(
+    domain ? `${domain}:${observableLabel}` : observableLabel,
+  );
+  const subscriptionLabel =
+    devtoolsCandidate.subscriptionId || devtoolsCandidate.instanceId || 'default';
   const subscriptionKey = sanitizeLaneKeyPart(subscriptionLabel);
   const laneKey = `${observableKey}/${subscriptionKey}`;
   const timestamp =

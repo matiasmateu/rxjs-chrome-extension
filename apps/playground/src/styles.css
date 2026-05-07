@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
   background: #0b1220;
   color: #dbe7ff;
 }
@@ -14,8 +14,7 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at 10% 0%, rgba(35, 132, 255, 0.18), transparent 40%),
-    radial-gradient(circle at 95% 100%, rgba(56, 189, 248, 0.15), transparent 45%),
-    #0b1220;
+    radial-gradient(circle at 95% 100%, rgba(56, 189, 248, 0.15), transparent 45%), #0b1220;
 }
 
 .app {

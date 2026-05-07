@@ -1,13 +1,7 @@
 // background.ts (MV3 service worker)
 import { PANEL_PORT_NAME } from '../transport-types';
-import type {
-  PanelAckMessage,
-  RuntimeBackgroundPayload,
-} from '../transport-types';
-import {
-  createBackgroundPayload,
-  parsePanelInitMessage,
-} from '../transport-parser';
+import type { PanelAckMessage, RuntimeBackgroundPayload } from '../transport-types';
+import { createBackgroundPayload, parsePanelInitMessage } from '../transport-parser';
 
 const BUFFER_LIMIT = 200;
 

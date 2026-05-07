@@ -29,6 +29,7 @@
 ## Decision Log
 
 - [ADR-0001: Migration Decisions](./adr/ADR-0001-migration-decisions.md)
+- [RDR-0001: Developer-Friendly Refactor Plan](./rdr/RDR-0001-developer-friendly-refactor.md)
 
 ## Maintenance Rules
 

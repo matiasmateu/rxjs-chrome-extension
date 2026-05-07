@@ -32,11 +32,5 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Test Extension
-        run: pnpm --filter @rxjs-devtools/extension test
-
-      - name: Typecheck Workspace
-        run: pnpm typecheck
-
-      - name: Build Workspace
-        run: pnpm build
+      - name: Verify Workspace
+        run: pnpm verify

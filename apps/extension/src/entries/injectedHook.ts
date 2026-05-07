@@ -91,7 +91,7 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
       seen.add(value);
 
       if (Array.isArray(value)) {
-        return value.slice(0, 50).map(item => safeSerialize(item, depth - 1, seen));
+        return value.slice(0, 50).map((item) => safeSerialize(item, depth - 1, seen));
       }
 
       const out: Record<string, unknown> = {};
@@ -132,7 +132,10 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
     const instanceId = `hook_${++instanceSeq}`;
     const observableId = key || getObservableId(observable);
     const sourceLabel = label || key || observableId;
-    const source: NonNullable<RxDevtoolsMessage['source']> = { label: sourceLabel, operator: 'hook' };
+    const source: NonNullable<RxDevtoolsMessage['source']> = {
+      label: sourceLabel,
+      operator: 'hook',
+    };
     if (domain) source.domain = domain;
     if (Array.isArray(tags) && tags.length > 0) source.tags = tags;
 
@@ -172,7 +175,11 @@ import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/
 
       if (notification.kind === 'C') {
         send({ kind: 'complete', ts: Date.now(), ...base });
-        dbg('Notification', { label: sourceLabel, kind: 'complete', dt: performance.now() - start });
+        dbg('Notification', {
+          label: sourceLabel,
+          kind: 'complete',
+          dt: performance.now() - start,
+        });
       }
     });
 

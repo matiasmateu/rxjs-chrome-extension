@@ -7,37 +7,44 @@ import {
   prettifyDomain,
 } from './formatters';
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 /**
  * Builds a UI-friendly summary model from a raw runtime/devtools message.
  *
  * @param message Raw message object shown in the tooltip panel.
  * @returns Normalized message info used by `TooltipPanel`.
  */
-export function extractMessageInfo(message: any): MessageInfo {
-  const label = firstString(
-    message?.source?.label,
-    message?.label,
-    message?.observableId,
-    message?.instanceId,
-  );
+export function extractMessageInfo(message: unknown): MessageInfo {
+  const msg = asRecord(message) || {};
+  const source = asRecord(msg.source) || {};
 
-  const domainRaw = normalizeTypeLabel(firstString(message?.source?.domain, message?.domain));
-  const kindRaw = normalizeTypeLabel(firstString(message?.rxKind, message?.kind));
-  const operator = firstString(message?.source?.operator);
-  const tags = Array.isArray(message?.source?.tags) ? message.source.tags : [];
+  const label = firstString(source.label, msg.label, msg.observableId, msg.instanceId);
 
-  const timeMs = normalizeTimestampMs(message?.ts, message?.time, message?.timestamp);
+  const domainRaw = normalizeTypeLabel(firstString(source.domain, msg.domain));
+  const kindRaw = normalizeTypeLabel(firstString(msg.rxKind, msg.kind));
+  const operator = firstString(source.operator);
+  const tags = stringArray(source.tags);
+
+  const timeMs = normalizeTimestampMs(msg.ts, msg.time, msg.timestamp);
 
   return {
     domainLabel: domainRaw ? prettifyDomain(domainRaw) || domainRaw : 'Unknown domain',
     label: label || 'Unknown label',
     kindLabel: kindRaw ? kindRaw.toUpperCase() : 'UNKNOWN',
     operator: operator || '',
-    observableId: message?.observableId || 'Unknown observable',
-    instanceId: message?.instanceId || '',
-    subscriptionId: message?.subscriptionId || '',
+    observableId: firstString(msg.observableId) || 'Unknown observable',
+    instanceId: firstString(msg.instanceId),
+    subscriptionId: firstString(msg.subscriptionId),
     tags,
     timeLabel: timeMs ? fmtTime(timeMs) : '',
-    dataPayload: message?.data ?? null,
+    dataPayload: msg.data ?? null,
   };
 }

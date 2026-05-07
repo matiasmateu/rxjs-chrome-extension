@@ -116,7 +116,7 @@ export class LaneLayout {
 
     const getGroupingTag = (tags: string[] | undefined) => {
       if (!tags || tags.length === 0) return '';
-      const specificTag = tags.find(t => t.includes('-'));
+      const specificTag = tags.find((t) => t.includes('-'));
       if (specificTag) return specificTag;
       return tags[tags.length - 1] || '';
     };

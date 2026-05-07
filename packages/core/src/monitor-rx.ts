@@ -170,11 +170,12 @@ export const monitorRx =
     const notify = options.notify ?? safeNotify;
     const serialize = options.serialize ?? safeSerialize;
     const label = options.label ?? options.observableKey;
-    const observableId = options.observableKey ?? options.label ?? getObservableId(source as object);
+    const observableId =
+      options.observableKey ?? options.label ?? getObservableId(source as object);
 
     const meta = label ? { ...(options.meta ?? {}), observable: label } : options.meta;
 
-    return new Observable<T>(subscriber => {
+    return new Observable<T>((subscriber) => {
       const subscriptionId = `sub_${++subscriptionSeq}`;
 
       const base: Omit<RxDevtoolsMessage, 'kind' | 'ts' | 'data'> = {

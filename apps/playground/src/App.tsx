@@ -19,9 +19,7 @@ function buildStream(
   intervalMs: number,
   payloadSize: number,
 ) {
-  const base$ = interval(intervalMs).pipe(
-    map((tick) => makePayload(streamId, tick, payloadSize)),
-  );
+  const base$ = interval(intervalMs).pipe(map((tick) => makePayload(streamId, tick, payloadSize)));
 
   if (scenario === 'next-only') {
     return base$;
@@ -63,7 +61,7 @@ export function App() {
   );
 
   const stopStreams = () => {
-    subscriptionsRef.current.forEach(subscription => subscription.unsubscribe());
+    subscriptionsRef.current.forEach((subscription) => subscription.unsubscribe());
     subscriptionsRef.current = [];
     setStatus('stopped');
   };
@@ -104,7 +102,10 @@ export function App() {
       <section className="controls">
         <label>
           Scenario
-          <select value={scenario} onChange={(event) => setScenario(event.target.value as Scenario)}>
+          <select
+            value={scenario}
+            onChange={(event) => setScenario(event.target.value as Scenario)}
+          >
             <option value="mixed">mixed</option>
             <option value="next-only">next-only</option>
             <option value="complete">complete</option>
@@ -155,7 +156,8 @@ export function App() {
       </section>
 
       <p className="hint">
-        Open this page with the extension installed and the DevTools panel open to inspect emitted events.
+        Open this page with the extension installed and the DevTools panel open to inspect emitted
+        events.
       </p>
     </main>
   );

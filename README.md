@@ -18,8 +18,10 @@ Monorepo for the RxJS DevTools extension and supporting packages.
 
 - `pnpm build`
 - `pnpm dev`
+- `pnpm verify`
 - `pnpm typecheck`
 - `pnpm typecheck:extension`
+- `pnpm build:extension`
 - `pnpm clean`
 - `pnpm dev:extension`
 - `pnpm dev:playground`

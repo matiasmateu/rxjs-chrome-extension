@@ -41,7 +41,7 @@ export class MarblePanelRuntime {
   hoverId: number | null;
   pinnedId: number | null;
   lastTooltipPayload: TooltipState | null;
-  
+
   filteredLaneMap: Map<number, number>;
 
   interactions: InteractionController;
@@ -298,11 +298,14 @@ export class MarblePanelRuntime {
     const marble = targetId ? this.marbles.find((m) => m.id === targetId) : null;
 
     if (!marble) {
-      this.publishTooltip(buildTooltipState({
-        marble: null,
-        pinnedId: this.pinnedId,
-        hoverId: this.hoverId,
-      }), !this.lastTooltipPayload?.visible);
+      this.publishTooltip(
+        buildTooltipState({
+          marble: null,
+          pinnedId: this.pinnedId,
+          hoverId: this.hoverId,
+        }),
+        !this.lastTooltipPayload?.visible,
+      );
       return;
     }
 
@@ -311,20 +314,24 @@ export class MarblePanelRuntime {
       y: laneYForIndex(this, marble.lane),
     };
 
-    this.publishTooltip(buildTooltipState({
-      marble,
-      pinnedId: this.pinnedId,
-      hoverId: this.hoverId,
-      position,
-    }));
+    this.publishTooltip(
+      buildTooltipState({
+        marble,
+        pinnedId: this.pinnedId,
+        hoverId: this.hoverId,
+        position,
+      }),
+    );
   }
 
   publishTooltip(payload: TooltipState | null, silent = false) {
-    const normalized = payload || buildTooltipState({
-      marble: null,
-      pinnedId: this.pinnedId,
-      hoverId: this.hoverId,
-    });
+    const normalized =
+      payload ||
+      buildTooltipState({
+        marble: null,
+        pinnedId: this.pinnedId,
+        hoverId: this.hoverId,
+      });
 
     if (tooltipStateChanged(this.lastTooltipPayload, normalized)) {
       this.lastTooltipPayload = normalized;

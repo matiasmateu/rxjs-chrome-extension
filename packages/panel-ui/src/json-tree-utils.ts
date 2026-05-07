@@ -17,8 +17,7 @@ export function formatLeaf(v: unknown): string {
 }
 
 function simplify(x: unknown): unknown {
-  if (x && typeof x === 'object')
-    return Array.isArray(x) ? `Array(${x.length})` : 'Object';
+  if (x && typeof x === 'object') return Array.isArray(x) ? `Array(${x.length})` : 'Object';
   if (typeof x === 'string') return x.length > 24 ? `${x.slice(0, 21)}…` : x;
   return x;
 }
