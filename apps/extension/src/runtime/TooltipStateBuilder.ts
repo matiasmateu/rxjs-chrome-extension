@@ -9,6 +9,12 @@ type TooltipBuildInput = {
   position?: { x: number; y: number };
 };
 
+/**
+ * Builds the immutable tooltip view state from current hover/pin runtime data.
+ *
+ * @param input Tooltip source inputs.
+ * @returns Tooltip state consumed by React UI.
+ */
 export function buildTooltipState(input: TooltipBuildInput): TooltipState {
   const { marble, pinnedId, hoverId, position } = input;
   if (!marble || !position) {
@@ -32,6 +38,13 @@ export function buildTooltipState(input: TooltipBuildInput): TooltipState {
   };
 }
 
+/**
+ * Compares two tooltip states to decide whether UI update is needed.
+ *
+ * @param prev Previous tooltip state.
+ * @param next Next tooltip state.
+ * @returns `true` when meaningful tooltip fields changed.
+ */
 export function tooltipStateChanged(prev: TooltipState | null, next: TooltipState) {
   return (
     !prev ||

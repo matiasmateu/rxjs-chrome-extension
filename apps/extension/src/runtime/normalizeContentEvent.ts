@@ -7,6 +7,12 @@ import type {
   NormalizedContentEvent,
 } from './runtime-types';
 
+/**
+ * Converts a raw transport payload into a normalized runtime event used by the panel.
+ *
+ * @param input Unknown payload from panel transport.
+ * @returns Normalized event for rendering/storage, or `null` when payload is invalid.
+ */
 export function normalizeContentEvent(input: unknown): NormalizedContentEvent | null {
   const decoded = decodeRuntimeTransportMessage(input);
   if (!decoded) {

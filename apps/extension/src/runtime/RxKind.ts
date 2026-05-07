@@ -1,8 +1,25 @@
+/**
+ * Normalizes Rx lifecycle kinds to lowercase text.
+ *
+ * @param value Raw kind value.
+ * @returns Lowercase kind or empty string when invalid.
+ */
 export function normalizeRxKind(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value.trim().toLowerCase();
 }
 
+/**
+ * Draws the marble glyph for a given Rx lifecycle kind.
+ *
+ * @param ctx Canvas rendering context.
+ * @param rawKind Raw lifecycle kind.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @param r Base radius.
+ * @param color Fill/stroke color.
+ * @returns Nothing.
+ */
 export function drawRxKindGlyph(
   ctx: CanvasRenderingContext2D,
   rawKind: unknown,

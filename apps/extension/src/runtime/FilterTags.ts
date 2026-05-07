@@ -22,6 +22,12 @@ function prettifyDomain(domain?: string): string {
     .join(' ');
 }
 
+/**
+ * Extracts filter tags used by the panel domain filter controls.
+ *
+ * @param message Runtime marble message candidate.
+ * @returns Normalized domain key/label pair.
+ */
 export function extractFilterTags(message: Partial<RuntimeMarbleMessage> | null | undefined): FilterTags {
   const domainRaw = normalizeTypeLabel(firstString(message?.source?.domain, message?.domain));
   const domainKey = (domainRaw || 'unknown').toLowerCase();

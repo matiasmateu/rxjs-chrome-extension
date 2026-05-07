@@ -1,3 +1,9 @@
+/**
+ * Generates a deterministic bright RGB color from a string key.
+ *
+ * @param str Source key (for example event type/lane id).
+ * @returns Stable RGB color string.
+ */
 export function hashColor(str: string): string {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < str.length; i++) {

@@ -2,6 +2,11 @@
 
 Monorepo for the RxJS DevTools extension and supporting packages.
 
+## Documentation
+
+- Start at [`docs/README.md`](./docs/README.md)
+- Quickstart at [`docs/quickstart.md`](./docs/quickstart.md)
+
 ## Workspace Layout
 
 - `apps/extension`: Chrome MV3 extension app (current codebase)

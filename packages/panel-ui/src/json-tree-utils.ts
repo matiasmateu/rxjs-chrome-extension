@@ -1,3 +1,9 @@
+/**
+ * Formats a leaf value from the JSON tree into a compact printable string.
+ *
+ * @param v Raw leaf value.
+ * @returns String representation suitable for monospace display.
+ */
 export function formatLeaf(v: unknown): string {
   const t = typeof v;
   if (v === null) return 'null';
@@ -17,6 +23,12 @@ function simplify(x: unknown): unknown {
   return x;
 }
 
+/**
+ * Produces a short preview shape for complex values used in collapsed tree rows.
+ *
+ * @param v Raw value.
+ * @returns Simplified preview value.
+ */
 export function previewValue(v: unknown): unknown {
   if (v === null) return null;
   if (Array.isArray(v)) return v.slice(0, 3).map((x) => simplify(x));
@@ -32,6 +44,13 @@ export function previewValue(v: unknown): unknown {
   return simplify(v);
 }
 
+/**
+ * Truncates long text and appends an ellipsis when the limit is exceeded.
+ *
+ * @param s Source string.
+ * @param n Max length.
+ * @returns Original or truncated string.
+ */
 export function truncate(s: string, n: number): string {
   if (!s) return '';
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
