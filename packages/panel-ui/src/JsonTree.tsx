@@ -1,5 +1,10 @@
 import { forwardRef, type JSX, useMemo } from 'react';
-import { TIP_TREE_STYLE } from './styles';
+import {
+  JSON_TREE_CHILDREN_STYLE,
+  JSON_TREE_LINE_STYLE,
+  JSON_TREE_SUMMARY_STYLE,
+  TIP_TREE_STYLE,
+} from './styles';
 import { formatLeaf, previewValue, truncate } from './json-tree-utils';
 
 type JsonTreeProps = {
@@ -19,7 +24,7 @@ function buildJsonNodes(
   if (!isObj) {
     const label = key ? `${JSON.stringify(key)}: ${formatLeaf(value)}` : formatLeaf(value);
     elements.push(
-      <div key={key || 'leaf'} style={{ whiteSpace: 'pre' }}>
+      <div key={key || 'leaf'} style={JSON_TREE_LINE_STYLE}>
         {label}
       </div>,
     );
@@ -29,7 +34,7 @@ function buildJsonNodes(
   if (visited.has(value)) {
     const label = `${JSON.stringify(key)}: <circular>`;
     elements.push(
-      <div key={`${key || 'root'}-circular`} style={{ whiteSpace: 'pre' }}>
+      <div key={`${key || 'root'}-circular`} style={JSON_TREE_LINE_STYLE}>
         {label}
       </div>,
     );
@@ -58,16 +63,8 @@ function buildJsonNodes(
 
   elements.push(
     <details key={key || 'root'} open={depth < 1}>
-      <summary style={{ cursor: 'pointer' }}>{summaryLabel}</summary>
-      <div
-        style={{
-          paddingLeft: '14px',
-          borderLeft: '1px solid rgba(90,120,150,.25)',
-          marginLeft: '6px',
-        }}
-      >
-        {children}
-      </div>
+      <summary style={JSON_TREE_SUMMARY_STYLE}>{summaryLabel}</summary>
+      <div style={JSON_TREE_CHILDREN_STYLE}>{children}</div>
     </details>,
   );
 

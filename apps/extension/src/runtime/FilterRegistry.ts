@@ -4,6 +4,7 @@ export class FilterRegistry {
   filterText: string;
   filterDomain: string;
   filterDomains: Map<string, string>;
+  filterDomainCounts: Map<string, number>;
   notifyFilterOptions: ((options: FilterOptions) => void) | null;
 
   constructor(
@@ -14,6 +15,7 @@ export class FilterRegistry {
     this.filterText = (initialText || '').trim().toLowerCase();
     this.filterDomain = (initialDomain || '').toLowerCase();
     this.filterDomains = new Map();
+    this.filterDomainCounts = new Map();
     this.notifyFilterOptions = notifyFilterOptions || null;
   }
 
@@ -41,12 +43,16 @@ export class FilterRegistry {
         this.filterDomains.set(tags.domainKey, label);
         changed = true;
       }
+      const nextCount = (this.filterDomainCounts.get(tags.domainKey) || 0) + 1;
+      this.filterDomainCounts.set(tags.domainKey, nextCount);
+      changed = true;
     }
 
     if (changed && this.notifyFilterOptions) {
       const domains = Array.from(this.filterDomains.entries()).map(([value, label]) => ({
         value,
         label: label || value,
+        count: this.filterDomainCounts.get(value) || 0,
       }));
 
       domains.sort((a, b) => a.label.localeCompare(b.label));
@@ -57,6 +63,7 @@ export class FilterRegistry {
 
   clear = () => {
     this.filterDomains.clear();
+    this.filterDomainCounts.clear();
     if (this.notifyFilterOptions) {
       this.notifyFilterOptions({ domains: [] });
     }

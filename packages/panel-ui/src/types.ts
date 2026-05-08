@@ -15,6 +15,7 @@ export type TooltipState = {
 export type FilterOption = {
   value: string;
   label: string;
+  count?: number;
 };
 
 export type FilterOptions = {
@@ -38,23 +39,31 @@ export type ToolbarProps = {
   running: boolean;
   filterText: string;
   statsText: string;
+  detailsPanelOpen: boolean;
+  compact: boolean;
   onToggleRunning: () => void;
   onClear: () => void;
   onFilterTextChange: (value: string) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onToggleDetailsPanel: () => void;
 };
 
 export type FilterBarProps = {
   domains: FilterOption[];
   activeDomain: string;
+  activeText: string;
+  compact: boolean;
   onSelectDomain: (value: string) => void;
+  onClearFilters: () => void;
 };
 
 export type TooltipPanelProps = {
   tooltipState: TooltipState;
   messageInfo: MessageInfo | null;
   copyLabel: string;
+  compact: boolean;
+  width: number;
   onCopy: () => void;
   onDownload: () => void;
   onPin: () => void;
