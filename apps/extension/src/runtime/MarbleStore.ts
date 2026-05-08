@@ -1,4 +1,4 @@
-import { hashColor } from './ColorHash';
+import { semanticMarbleColor } from './ColorHash';
 import { extractFilterTags } from './FilterTags';
 import type { FilterRegistry } from './FilterRegistry';
 import type { LaneActivity } from './LaneActivity';
@@ -59,7 +59,13 @@ export class MarbleStore {
     this.options.laneActivity.update(laneKey, msg.rxKind, msg.subscriptionId);
     const lane = this.options.laneLayout.resolveLaneKey(laneKey, this.marbles, msg);
 
-    let color = hashColor(type);
+    const filters = extractFilterTags(msg);
+
+    let color = semanticMarbleColor({
+      kind: msg.rxKind ?? msg.kind ?? msg.type,
+      type,
+      domainKey: filters.domainKey,
+    });
     if (msg.color != null) {
       if (typeof msg.color === 'string') {
         color = msg.color;
@@ -68,8 +74,6 @@ export class MarbleStore {
         color = `hsl(${hue}, 70%, 55%)`;
       }
     }
-
-    const filters = extractFilterTags(msg);
 
     const marble: Marble = {
       id: this.nextId++,
