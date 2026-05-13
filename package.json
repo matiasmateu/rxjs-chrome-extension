@@ -22,9 +22,9 @@
     "build:extension": "pnpm --filter @rxjs-devtools/extension build",
     "dev:extension": "pnpm --filter @rxjs-devtools/extension dev",
     "dev:playground": "pnpm --filter @rxjs-devtools/playground dev",
-    "bump:patch": "pnpm --filter rxjs-monitor exec pnpm version patch --no-git-tag-version",
-    "bump:minor": "pnpm --filter rxjs-monitor exec pnpm version minor --no-git-tag-version",
-    "bump:major": "pnpm --filter rxjs-monitor exec pnpm version major --no-git-tag-version"
+    "bump:patch": "npm --prefix packages/core version patch --no-git-tag-version",
+    "bump:minor": "npm --prefix packages/core version minor --no-git-tag-version",
+    "bump:major": "npm --prefix packages/core version major --no-git-tag-version"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
