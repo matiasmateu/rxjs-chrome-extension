@@ -1,4 +1,4 @@
-import { monitorRX } from '@rxjs-devtools/core';
+import { monitorRX } from 'rxjs-monitor';
 import { useMemo, useRef, useState } from 'react';
 import { concatWith, interval, map, type Subscription, take, throwError } from 'rxjs';
 

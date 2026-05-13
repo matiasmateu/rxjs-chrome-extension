@@ -1,4 +1,4 @@
-import { RXJS_DEVTOOLS_FROM } from '@rxjs-devtools/core/protocol';
+import { RXJS_DEVTOOLS_FROM } from 'rxjs-monitor/protocol';
 import type { PanelInitMessage } from './transport-types';
 
 export const DEFAULT_EVENT_TYPE = 'CONTENT_EVENT' as const;
