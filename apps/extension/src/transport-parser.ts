@@ -1,4 +1,4 @@
-import { isRxDevtoolsEvent, type RxDevtoolsMessage } from '@rxjs-devtools/core/protocol';
+import { isRxDevtoolsEvent, type RxDevtoolsMessage } from 'rxjs-devtools/protocol';
 import {
   DEFAULT_EVENT_TYPE,
   getEventType,

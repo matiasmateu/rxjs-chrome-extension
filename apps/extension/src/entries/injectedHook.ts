@@ -1,5 +1,5 @@
-import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from '@rxjs-devtools/core/protocol';
-import { safeSerialize } from '@rxjs-devtools/core/monitor-rx';
+import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from 'rxjs-devtools/protocol';
+import { safeSerialize } from 'rxjs-devtools/monitor-rx';
 
 (() => {
   const DEBUG_FLAG_KEY = '__RXJS_DEVTOOLS_DEBUG__';

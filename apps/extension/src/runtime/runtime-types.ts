@@ -1,4 +1,4 @@
-import type { RxDevtoolsMessage, RxDevtoolsSource } from '@rxjs-devtools/core/protocol';
+import type { RxDevtoolsMessage, RxDevtoolsSource } from 'rxjs-devtools/protocol';
 import type { FilterOptions, FilterTags, TooltipState } from '../types';
 import type { RuntimeBackgroundPayload, RuntimeContentPayload } from '../transport-types';
 

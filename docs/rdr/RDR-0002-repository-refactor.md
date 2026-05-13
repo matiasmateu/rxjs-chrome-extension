@@ -201,7 +201,7 @@ Implemented:
 - injected hook debug logging is now gated and opt-in:
   - global flag: `window.__RXJS_DEVTOOLS_DEBUG__ = true`
   - persisted flag: `localStorage['rxjs-devtools:debug'] = 'true'` (or `'1'`)
-- deduplicated hook serialization by reusing `safeSerialize` from `@rxjs-devtools/core/monitor-rx` with hook-specific bounds.
+- deduplicated hook serialization by reusing `safeSerialize` from `rxjs-devtools/monitor-rx` with hook-specific bounds.
 
 Validation:
 

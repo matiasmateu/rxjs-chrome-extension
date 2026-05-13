@@ -1,4 +1,4 @@
-import { RXJS_DEVTOOLS_FROM } from '@rxjs-devtools/core/protocol';
+import { RXJS_DEVTOOLS_FROM } from 'rxjs-devtools/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   createBackgroundPayload,

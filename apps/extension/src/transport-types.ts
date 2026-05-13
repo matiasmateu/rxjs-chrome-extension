@@ -1,4 +1,4 @@
-import type { RxDevtoolsMessage } from '@rxjs-devtools/core/protocol';
+import type { RxDevtoolsMessage } from 'rxjs-devtools/protocol';
 
 export const PANEL_PORT_NAME = 'rxjs-panel' as const;
 
