@@ -1,4 +1,4 @@
-import { RXJS_DEVTOOLS_FROM, type RxDevtoolsEventKind } from 'rxjs-devtools/protocol';
+import { RXJS_DEVTOOLS_FROM, type RxDevtoolsEventKind } from 'rxjs-monitor/protocol';
 import { describe, expect, it } from 'vitest';
 import { parsePageHookForwardMessage, createBackgroundPayload } from '../../transport-parser';
 import { FilterRegistry } from '../FilterRegistry';

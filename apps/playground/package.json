@@ -11,7 +11,7 @@
     "clean": "rm -rf dist src/*.js vite.config.js tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "rxjs-devtools": "workspace:*",
+    "rxjs-monitor": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "rxjs": "^7.8.1"
