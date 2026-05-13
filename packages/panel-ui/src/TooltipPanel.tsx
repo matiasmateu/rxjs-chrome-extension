@@ -6,6 +6,7 @@ import {
   TIP_CONTENT_STYLE,
   TIP_HEADER_STYLE,
   TIP_LABEL_STYLE,
+  TIP_PILL_EPIC_STYLE,
   TIP_PILL_STYLE,
   TIP_ROW_STYLE,
   TIP_SCROLL_STYLE,
@@ -78,11 +79,46 @@ export function TooltipPanel({
                 <span style={TIP_PILL_STYLE}>{messageInfo?.kindLabel || 'Unknown kind'}</span>
               </div>
               <div style={TIP_ROW_STYLE}>
+                <span style={TIP_LABEL_STYLE}>Stream:</span>
+                <span
+                  style={{
+                    ...TIP_PILL_STYLE,
+                    ...(messageInfo?.isEpic ? TIP_PILL_EPIC_STYLE : null),
+                  }}
+                >
+                  {messageInfo?.streamKind || 'OBSERVABLE'}
+                </span>
+              </div>
+              <div style={TIP_ROW_STYLE}>
                 <span style={TIP_LABEL_STYLE}>Observable:</span>
                 <span style={TIP_PILL_STYLE}>
                   {messageInfo?.observableId || 'Unknown observable'}
                 </span>
               </div>
+              {messageInfo?.isEpic && messageInfo.epicName ? (
+                <div style={TIP_ROW_STYLE}>
+                  <span style={TIP_LABEL_STYLE}>Epic:</span>
+                  <span style={{ ...TIP_PILL_STYLE, ...TIP_PILL_EPIC_STYLE }}>
+                    {messageInfo.epicName}
+                  </span>
+                </div>
+              ) : null}
+              {messageInfo?.isEpic && messageInfo.epicInvocationId ? (
+                <div style={TIP_ROW_STYLE}>
+                  <span style={TIP_LABEL_STYLE}>Invocation:</span>
+                  <span style={{ ...TIP_PILL_STYLE, ...TIP_PILL_EPIC_STYLE }}>
+                    {messageInfo.epicInvocationId}
+                  </span>
+                </div>
+              ) : null}
+              {messageInfo?.isEpic && messageInfo.epicScenarioId ? (
+                <div style={TIP_ROW_STYLE}>
+                  <span style={TIP_LABEL_STYLE}>Scenario:</span>
+                  <span style={{ ...TIP_PILL_STYLE, ...TIP_PILL_EPIC_STYLE }}>
+                    {messageInfo.epicScenarioId}
+                  </span>
+                </div>
+              ) : null}
               {messageInfo?.instanceId ? (
                 <div style={TIP_ROW_STYLE}>
                   <span style={TIP_LABEL_STYLE}>Instance:</span>

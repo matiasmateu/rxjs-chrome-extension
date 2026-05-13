@@ -25,6 +25,10 @@ function stringArray(value: unknown): string[] {
 export function extractMessageInfo(message: unknown): MessageInfo {
   const msg = asRecord(message) || {};
   const source = asRecord(msg.source) || {};
+  const meta = asRecord(msg.meta) || {};
+  const sourceEpic = asRecord(source.epic);
+  const metaEpic = asRecord(meta.epic);
+  const epic = sourceEpic || metaEpic;
 
   const label = firstString(source.label, msg.label, msg.observableId, msg.instanceId);
 
@@ -32,6 +36,21 @@ export function extractMessageInfo(message: unknown): MessageInfo {
   const kindRaw = normalizeTypeLabel(firstString(msg.rxKind, msg.kind));
   const operator = firstString(source.operator);
   const tags = stringArray(source.tags);
+  const streamKindRaw = normalizeTypeLabel(
+    firstString(
+      msg.eventCategory,
+      source.streamKind,
+      msg.streamKind,
+      meta.streamKind,
+      epic ? 'epic' : 'observable',
+    ),
+  ).toLowerCase();
+  const isEpic =
+    streamKindRaw === 'epic' || tags.some((tag) => tag.trim().toLowerCase() === 'epic');
+  const streamKind = isEpic ? 'EPIC' : 'OBSERVABLE';
+  const epicName = firstString(epic?.name, meta.epicName);
+  const epicInvocationId = firstString(epic?.invocationId, meta.invocationId);
+  const epicScenarioId = firstString(epic?.scenarioId, meta.scenario);
 
   const timeMs = normalizeTimestampMs(msg.ts, msg.time, msg.timestamp);
 
@@ -39,6 +58,11 @@ export function extractMessageInfo(message: unknown): MessageInfo {
     domainLabel: domainRaw ? prettifyDomain(domainRaw) || domainRaw : 'Unknown domain',
     label: label || 'Unknown label',
     kindLabel: kindRaw ? kindRaw.toUpperCase() : 'UNKNOWN',
+    streamKind,
+    isEpic,
+    epicName,
+    epicInvocationId,
+    epicScenarioId,
     operator: operator || '',
     observableId: firstString(msg.observableId) || 'Unknown observable',
     instanceId: firstString(msg.instanceId),

@@ -36,6 +36,7 @@ describe('normalizeContentEvent', () => {
       type: 'NEXT • User Stream',
       kind: 'next',
       rxKind: 'next',
+      eventCategory: 'observable',
       label: 'User Stream',
       domain: 'media-player',
       observableId: 'obs/1',
@@ -67,12 +68,44 @@ describe('normalizeContentEvent', () => {
       type: 'COMPLETE • obs2',
       kind: 'complete',
       rxKind: 'complete',
+      eventCategory: 'observable',
       label: 'obs2',
       domain: 'unknown',
       laneKey: 'unknown:obs2/sub2',
       time: 11,
     });
     expect(normalized?.raw.content).toBeNull();
+  });
+
+  it('classifies epic stream events from source metadata', () => {
+    const input = {
+      data: {
+        __from: 'CONTENT_SCRIPT',
+        message: {
+          kind: 'subscribe' as const,
+          observableId: 'epic_obs',
+          instanceId: 'epic_inst',
+          subscriptionId: 'epic_sub',
+          ts: 100,
+          source: {
+            label: 'SearchUsersEpic #inv_1',
+            domain: 'playground-epic',
+            streamKind: 'epic',
+            epic: {
+              name: 'SearchUsersEpic',
+              invocationId: 'inv_1',
+              scenarioId: 'epic-success',
+            },
+          },
+        },
+      },
+    };
+
+    const normalized = normalizeContentEvent(input);
+    expect(normalized).not.toBeNull();
+    expect(normalized?.eventCategory).toBe('epic');
+    expect(normalized?.source?.streamKind).toBe('epic');
+    expect(normalized?.source?.epic?.invocationId).toBe('inv_1');
   });
 
   it('returns null for payloads without a valid devtools message', () => {

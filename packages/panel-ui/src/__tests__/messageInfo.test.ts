@@ -23,6 +23,11 @@ describe('extractMessageInfo', () => {
     expect(info.domainLabel).toBe('User Profile');
     expect(info.label).toBe('Fetch User');
     expect(info.kindLabel).toBe('NEXT');
+    expect(info.streamKind).toBe('OBSERVABLE');
+    expect(info.isEpic).toBe(false);
+    expect(info.epicName).toBe('');
+    expect(info.epicInvocationId).toBe('');
+    expect(info.epicScenarioId).toBe('');
     expect(info.operator).toBe('map');
     expect(info.observableId).toBe('obs_1');
     expect(info.instanceId).toBe('inst_1');
@@ -40,6 +45,35 @@ describe('extractMessageInfo', () => {
     expect(info.kindLabel).toBe('UNKNOWN');
     expect(info.observableId).toBe('Unknown observable');
     expect(info.dataPayload).toBeNull();
+  });
+
+  it('extracts epic invocation metadata', () => {
+    const info = extractMessageInfo({
+      rxKind: 'subscribe',
+      observableId: 'epic_obs',
+      instanceId: 'epic_inst',
+      subscriptionId: 'epic_sub',
+      source: {
+        label: 'SearchUsersEpic #inv_1',
+        domain: 'playground-epic',
+        streamKind: 'epic',
+        tags: ['playground', 'epic', 'epic-success'],
+        epic: {
+          name: 'SearchUsersEpic',
+          invocationId: 'inv_1',
+          scenarioId: 'epic-success',
+        },
+      },
+      meta: {
+        scenario: 'epic-success',
+      },
+    });
+
+    expect(info.streamKind).toBe('EPIC');
+    expect(info.isEpic).toBe(true);
+    expect(info.epicName).toBe('SearchUsersEpic');
+    expect(info.epicInvocationId).toBe('inv_1');
+    expect(info.epicScenarioId).toBe('epic-success');
   });
 });
 

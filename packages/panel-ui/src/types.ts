@@ -25,6 +25,11 @@ export type MessageInfo = {
   domainLabel: string;
   label: string;
   kindLabel: string;
+  streamKind: string;
+  isEpic: boolean;
+  epicName: string;
+  epicInvocationId: string;
+  epicScenarioId: string;
   operator: string;
   observableId: string;
   instanceId: string;

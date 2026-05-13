@@ -196,3 +196,9 @@ export const TIP_PILL_STYLE = css({
   maxWidth: '100%',
   wordBreak: 'break-word',
 });
+
+export const TIP_PILL_EPIC_STYLE = css({
+  background: 'rgba(194, 65, 12, 0.35)',
+  border: '1px solid rgba(251, 146, 60, 0.8)',
+  color: '#ffedd5',
+});

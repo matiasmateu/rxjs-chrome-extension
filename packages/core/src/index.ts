@@ -3,7 +3,9 @@ export {
   isRxDevtoolsEvent,
   type RxDevtoolsEvent,
   type RxDevtoolsEventKind,
+  type RxDevtoolsEpicSource,
   type RxDevtoolsMessage,
+  type RxDevtoolsStreamKind,
   type RxDevtoolsSource,
 } from './protocol';
 

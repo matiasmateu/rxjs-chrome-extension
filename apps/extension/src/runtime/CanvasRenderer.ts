@@ -1,5 +1,5 @@
 import { fmtTime } from './RuntimeTime';
-import { drawRxKindGlyph } from './RxKind';
+import { drawEpicRxKindGlyph, drawRxKindGlyph } from './RxKind';
 import { truncate } from './StringUtils';
 import {
   DISABLED_LANE_STROKE,
@@ -47,6 +47,17 @@ function laneHasMatchingSample(state: CanvasRenderBaseState, laneKey: string): b
   const sampleMarble = state.laneSamplesByKey.get(laneKey);
   if (!sampleMarble) return false;
   return state.filters.matches(sampleMarble.msg?.label || '', sampleMarble.filters);
+}
+
+function isEpicMarble(marble: Marble): boolean {
+  const msg = marble.msg;
+  if (!msg) return false;
+  if (msg.eventCategory === 'epic') return true;
+  if (msg.source?.streamKind === 'epic') return true;
+  if (!Array.isArray(msg.source?.tags)) return false;
+  return msg.source.tags.some(
+    (tag) => typeof tag === 'string' && tag.trim().toLowerCase() === 'epic',
+  );
 }
 
 export function drawGrid(state: CanvasRenderBaseState) {
@@ -276,6 +287,10 @@ export function drawMarbles(state: DrawMarblesState): DrawMarblesResult {
 
     const baseColor = laneDisabled ? DISABLED_MARBLE_COLOR : marble.color;
     const color = isHover && !isPinned ? HOVER_ICON_COLOR : baseColor;
+    if (isEpicMarble(marble)) {
+      drawEpicRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
+      continue;
+    }
     drawRxKindGlyph(ctx, marble.msg?.rxKind ?? marble.msg?.kind, x, y, marble.r, color);
   }
 

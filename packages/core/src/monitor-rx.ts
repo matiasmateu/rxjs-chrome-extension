@@ -1,6 +1,11 @@
 import { type MonoTypeOperatorFunction, Observable } from 'rxjs';
 
-import { RXJS_DEVTOOLS_FROM, type RxDevtoolsMessage } from './protocol';
+import {
+  RXJS_DEVTOOLS_FROM,
+  type RxDevtoolsEpicSource,
+  type RxDevtoolsMessage,
+  type RxDevtoolsStreamKind,
+} from './protocol';
 
 export type NotifyRxjsDevtoolsOptions = {
   targetOrigin?: string;
@@ -149,6 +154,8 @@ export type MonitorRxOptions = {
   domain?: string;
   label?: string;
   tags?: string[];
+  streamKind?: RxDevtoolsStreamKind;
+  epic?: RxDevtoolsEpicSource;
   meta?: Record<string, unknown>;
   observableKey?: string;
   serialize?: (value: unknown) => unknown;
@@ -172,6 +179,7 @@ export const monitorRx =
     const label = options.label ?? options.observableKey;
     const observableId =
       options.observableKey ?? options.label ?? getObservableId(source as object);
+    const streamKind = options.streamKind ?? 'observable';
 
     const meta = label ? { ...(options.meta ?? {}), observable: label } : options.meta;
 
@@ -188,6 +196,8 @@ export const monitorRx =
           label,
           tags: options.tags,
           operator: 'monitorRx',
+          streamKind,
+          epic: options.epic,
         },
       };
 

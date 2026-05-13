@@ -23,6 +23,12 @@ export function normalizeContentEvent(input: unknown): NormalizedContentEvent | 
   const rxKind = normalizeRxKind(devtoolsCandidate.kind);
   const kindLabel = rxKind ? rxKind.toUpperCase() : 'EVENT';
   const source = devtoolsCandidate.source || {};
+  const sourceKindRaw = firstString(
+    source.streamKind,
+    devtoolsCandidate.meta?.streamKind,
+    source.epic ? 'epic' : '',
+  );
+  const eventCategory = sourceKindRaw.toLowerCase() === 'epic' ? 'epic' : 'observable';
   const label = firstString(
     source.label,
     devtoolsCandidate.observableId,
@@ -48,6 +54,7 @@ export function normalizeContentEvent(input: unknown): NormalizedContentEvent | 
     type: label ? `${kindLabel} • ${label}` : kindLabel,
     kind: rxKind || 'event',
     rxKind,
+    eventCategory,
     label,
     domain,
     observableId: devtoolsCandidate.observableId,

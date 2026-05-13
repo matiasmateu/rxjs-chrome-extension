@@ -6,11 +6,21 @@ export type RxDevtoolsEventKind =
   | 'unsubscribe'
   | 'create';
 
+export type RxDevtoolsStreamKind = 'observable' | 'epic';
+
+export type RxDevtoolsEpicSource = {
+  name: string;
+  invocationId: string;
+  scenarioId?: string;
+};
+
 export type RxDevtoolsSource = {
   label?: string;
   domain?: string;
   operator?: string;
   tags?: string[];
+  streamKind?: RxDevtoolsStreamKind;
+  epic?: RxDevtoolsEpicSource;
 };
 
 export type RxDevtoolsMessage = {

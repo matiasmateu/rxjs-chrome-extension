@@ -29,6 +29,7 @@
 ## Decision Log
 
 - [ADR-0001: Migration Decisions](./adr/ADR-0001-migration-decisions.md)
+- [PDR-0001: Deterministic Epic Scenarios And Distinct Epic Invocation UI](./pdr/PDR-0001-epic-scenarios-and-panel-ux.md)
 - [RDR-0001: Developer-Friendly Refactor Plan](./rdr/RDR-0001-refactor.md)
 - [RDR-0002: Repository-Wide Developer-Friendly Refactor](./rdr/RDR-0002-repository-refactor.md)
 

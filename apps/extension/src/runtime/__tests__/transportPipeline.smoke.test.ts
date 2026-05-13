@@ -68,6 +68,7 @@ describe('transport pipeline smoke', () => {
     expect(store.totalEvents).toBe(3);
     expect(store.marbles).toHaveLength(3);
     expect(store.marbles[0]?.msg.kind).toBe('subscribe');
+    expect(store.marbles[0]?.msg.eventCategory).toBe('observable');
     expect(store.marbles[1]?.msg.kind).toBe('next');
     expect(store.marbles[2]?.msg.kind).toBe('complete');
     expect(store.marbles[0]?.laneKey).toBe(store.marbles[1]?.laneKey);

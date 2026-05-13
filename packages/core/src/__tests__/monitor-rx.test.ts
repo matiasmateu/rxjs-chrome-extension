@@ -69,6 +69,7 @@ describe('monitorRx', () => {
       'unsubscribe',
     ]);
     expect(events.every((event) => event.observableId.length > 0)).toBe(true);
+    expect(events.every((event) => event.source?.streamKind === 'observable')).toBe(true);
   });
 
   it('emits error lifecycle and preserves source error', () => {
@@ -91,5 +92,35 @@ describe('monitorRx', () => {
 
     expect(receivedError).toBe(sourceError);
     expect(events.map((event) => event.kind)).toEqual(['subscribe', 'error', 'unsubscribe']);
+  });
+
+  it('adds epic source metadata when stream kind is epic', () => {
+    const events: RxDevtoolsMessage[] = [];
+
+    of({ ok: true })
+      .pipe(
+        monitorRx({
+          observableKey: 'epic:search:inv_1',
+          label: 'SearchUsersEpic #inv_1',
+          domain: 'playground-epic',
+          streamKind: 'epic',
+          epic: {
+            name: 'SearchUsersEpic',
+            invocationId: 'inv_1',
+            scenarioId: 'epic-success',
+          },
+          notify: (msg) => events.push(msg),
+        }),
+      )
+      .subscribe({
+        next: () => {},
+        complete: () => {},
+      });
+
+    expect(events).not.toHaveLength(0);
+    expect(events.every((event) => event.source?.streamKind === 'epic')).toBe(true);
+    expect(events.every((event) => event.source?.epic?.name === 'SearchUsersEpic')).toBe(true);
+    expect(events.every((event) => event.source?.epic?.invocationId === 'inv_1')).toBe(true);
+    expect(events.every((event) => event.source?.epic?.scenarioId === 'epic-success')).toBe(true);
   });
 });

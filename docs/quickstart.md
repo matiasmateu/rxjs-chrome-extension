@@ -68,7 +68,11 @@ Open the printed URL (usually `http://localhost:5173`).
 In playground UI:
 
 1. Pick scenario (for example `mixed`).
-2. Click `Start`.
+2. For epic-focused checks, use one of:
+   - `epic-success`
+   - `epic-cancel`
+   - `epic-error`
+3. Click `Start`.
 
 ## Verify End-To-End
 

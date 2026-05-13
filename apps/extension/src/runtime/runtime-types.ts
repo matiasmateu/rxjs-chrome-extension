@@ -2,6 +2,8 @@ import type { RxDevtoolsMessage, RxDevtoolsSource } from '@rxjs-devtools/core/pr
 import type { FilterOptions, FilterTags, TooltipState } from '../types';
 import type { RuntimeBackgroundPayload, RuntimeContentPayload } from '../transport-types';
 
+export type StreamEventCategory = 'observable' | 'epic';
+
 export type RefObject<T> = { current: T | null };
 
 export type RuntimeOptions = {
@@ -30,6 +32,7 @@ export type NormalizedContentEvent = {
   type: string;
   kind: string;
   rxKind: string;
+  eventCategory: StreamEventCategory;
   label: string;
   domain: string;
   observableId: string;
@@ -61,6 +64,7 @@ export type RuntimeSystemEvent = {
   color?: string | number;
   kind?: string;
   rxKind?: string;
+  eventCategory?: StreamEventCategory;
   observableId?: string;
   instanceId?: string;
   subscriptionId?: string;
