@@ -201,6 +201,9 @@ jobs:
         run: |
           node -e "const fs=require('fs');const p='packages/core/package.json';const m='apps/extension/manifest.json';const v=JSON.parse(fs.readFileSync(p,'utf8')).version;const manifest=JSON.parse(fs.readFileSync(m,'utf8'));manifest.version=v;fs.writeFileSync(m,JSON.stringify(manifest,null,2)+'\n');console.log('synced manifest version to',v)"
 
+      - name: Build core package for workspace resolution
+        run: pnpm --filter rxjs-monitor build
+
       - name: Build extension
         run: pnpm --filter @rxjs-devtools/extension build
 
