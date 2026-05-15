@@ -24,7 +24,10 @@
     "dev:playground": "pnpm --filter @rxjs-devtools/playground dev",
     "bump:patch": "npm --prefix packages/core version patch --no-git-tag-version",
     "bump:minor": "npm --prefix packages/core version minor --no-git-tag-version",
-    "bump:major": "npm --prefix packages/core version major --no-git-tag-version"
+    "bump:major": "npm --prefix packages/core version major --no-git-tag-version",
+    "release:patch": "npm --prefix packages/core version patch -m \"release: rxjs-monitor v%s\"",
+    "release:minor": "npm --prefix packages/core version minor -m \"release: rxjs-monitor v%s\"",
+    "release:major": "npm --prefix packages/core version major -m \"release: rxjs-monitor v%s\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

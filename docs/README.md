@@ -20,6 +20,7 @@
 ## Troubleshooting
 
 - [Debugging Runbook](./runbooks/debugging.md): symptom -> checks -> fixes.
+- [Release CD Runbook](./runbooks/release-cd.md): step-by-step npm + extension release automation.
 
 ## Reference
 

@@ -34,7 +34,8 @@
     "test": "vitest run",
     "lint": "eslint src --max-warnings=0 --ext .ts",
     "clean": "rm -rf dist",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "version": "node scripts/sync-extension-manifest-version.mjs"
   },
   "dependencies": {
     "rxjs": "^7.8.2"

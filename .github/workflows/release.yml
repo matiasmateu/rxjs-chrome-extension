@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - release/**
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: npm dist-tag to publish
+        type: choice
+        required: true
+        default: latest
+        options:
+          - latest
+          - next
+      publish_extension:
+        description: Publish Chrome extension
+        type: boolean
+        required: true
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.meta.outputs.should_release }}
+      npm_tag: ${{ steps.meta.outputs.npm_tag }}
+      core_version: ${{ steps.meta.outputs.core_version }}
+      publish_extension: ${{ steps.meta.outputs.publish_extension }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          core_version=$(node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('packages/core/package.json','utf8'));process.stdout.write(pkg.version)")
+          echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
+
+          should_release=false
+          npm_tag=latest
+          ref="${GITHUB_REF}"
+          publish_extension=true
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            should_release=true
+            npm_tag="${{ inputs.npm_tag }}"
+            publish_extension="${{ inputs.publish_extension }}"
+          elif [[ "$ref" == refs/tags/v* ]]; then
+            should_release=true
+            npm_tag=latest
+            publish_extension=false
+          elif [[ "$ref" == refs/heads/release/* ]]; then
+            npm_tag=latest
+          elif [[ "$ref" == refs/heads/main ]]; then
+            npm_tag=next
+          fi
+
+          if [[ "$should_release" != "true" ]]; then
+            before="${{ github.event.before }}"
+            if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]]; then
+              if git diff --name-only "$before" "$GITHUB_SHA" -- packages/core/package.json | grep -q .; then
+                should_release=true
+              fi
+            fi
+          fi
+
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=$npm_tag" >> "$GITHUB_OUTPUT"
+          echo "publish_extension=$publish_extension" >> "$GITHUB_OUTPUT"
+          echo "release=true, should_release=$should_release, npm_tag=$npm_tag, version=$core_version"
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify workspace
+        run: pnpm verify
+
+  publish_npm:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve package version
+        id: version
+        run: |
+          version=$(node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('packages/core/package.json','utf8'));process.stdout.write(pkg.version)")
+          echo "package_version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check if version already exists
+        id: exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.package_version }}"
+          if npm view "rxjs-monitor@${version}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.exists.outputs.already_published != 'true'
+        run: |
+          cd packages/core
+          npm publish --tag "${{ needs.prepare.outputs.npm_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skip existing npm version
+        if: steps.exists.outputs.already_published == 'true'
+        run: |
+          echo "rxjs-monitor@${{ steps.version.outputs.package_version }} already exists on npm; skipping publish."
+
+      - name: Ensure npm dist-tag
+        run: npm dist-tag add "rxjs-monitor@${{ steps.version.outputs.package_version }}" "${{ needs.prepare.outputs.npm_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish_extension:
+    needs: [prepare, publish_npm]
+    if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.publish_extension == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync extension manifest version
+        run: |
+          node -e "const fs=require('fs');const p='packages/core/package.json';const m='apps/extension/manifest.json';const v=JSON.parse(fs.readFileSync(p,'utf8')).version;const manifest=JSON.parse(fs.readFileSync(m,'utf8'));manifest.version=v;fs.writeFileSync(m,JSON.stringify(manifest,null,2)+'\n');console.log('synced manifest version to',v)"
+
+      - name: Build extension
+        run: pnpm --filter @rxjs-devtools/extension build
+
+      - name: Package extension zip
+        run: |
+          mkdir -p /tmp/release
+          cd apps/extension
+          zip -r /tmp/release/extension.zip manifest.json devtools.html panel.html dist
+
+      - name: Publish extension to Chrome Web Store
+        run: node scripts/release/publish-extension.mjs
+        env:
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ZIP_PATH: /tmp/release/extension.zip
