@@ -26,6 +26,7 @@
 
 - [Commands](./reference/commands.md)
 - [Glossary](./reference/glossary.md)
+- [`rxjs-monitor` Package Usage](../packages/core/README.md)
 
 ## Decision Log
 

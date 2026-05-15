@@ -6,6 +6,7 @@ Monorepo for the RxJS DevTools extension and supporting packages.
 
 - Start at [`docs/README.md`](./docs/README.md)
 - Quickstart at [`docs/quickstart.md`](./docs/quickstart.md)
+- `rxjs-monitor` npm usage at [`packages/core/README.md`](./packages/core/README.md)
 
 ## Workspace Layout
 
