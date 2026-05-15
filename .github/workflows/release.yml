@@ -210,6 +210,13 @@ jobs:
           cd apps/extension
           zip -r /tmp/release/extension.zip manifest.json devtools.html panel.html dist
 
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip-${{ github.run_id }}
+          path: /tmp/release/extension.zip
+          if-no-files-found: error
+
       - name: Publish extension to Chrome Web Store
         run: node scripts/release/publish-extension.mjs
         env:
