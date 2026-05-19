@@ -1,26 +1,38 @@
 {
   "manifest_version": 3,
   "name": "RxJS DevTools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Real-time RxJS marbles for redux-observable",
   "devtools_page": "devtools.html",
   "background": {
     "service_worker": "dist/background.js",
     "type": "module"
   },
-  "permissions": ["tabs"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["dist/contentScript.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/contentScript.js"
+      ],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["dist/injectedHook.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "dist/injectedHook.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
