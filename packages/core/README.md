@@ -53,7 +53,6 @@ stream$.subscribe();
 - `serialize`: Custom function to serialize `next` and `error` payloads before they are sent.
 - `notify`: Custom transport function to send protocol messages.
 
-
 ## Troubleshooting
 
 If TypeScript reports RxJS type conflicts from multiple `rxjs` installs, ensure a single shared version:

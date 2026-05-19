@@ -8,31 +8,19 @@
     "service_worker": "dist/background.js",
     "type": "module"
   },
-  "permissions": [
-    "tabs"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "permissions": ["tabs"],
+  "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "dist/contentScript.js"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["dist/contentScript.js"],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "dist/injectedHook.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["dist/injectedHook.js"],
+      "matches": ["<all_urls>"]
     }
   ]
 }
